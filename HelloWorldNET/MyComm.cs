@@ -7,6 +7,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -15,29 +16,6 @@ namespace HelloWorldNET
 {
     public class MyComm
     {
-        [CommandMethod("HelloWorld")]
-        public void HelloWorld()
-        {
-            Autodesk.AutoCAD.ApplicationServices.Application.ShowAlertDialog("Hello, World!");
-        }
-
-        [CommandMethod("AddTwoNumbers")]
-        public void HelloWorld2()
-        {
-            double num1 = 5.0;
-            double num2 = 10.0;
-            double sum = num1 + num2;
-            Autodesk.AutoCAD.ApplicationServices.Application.ShowAlertDialog($"The sum of {num1} and {num2} is {sum}.");
-        }
-
-        [CommandMethod("hileo")]
-        public void Heyo()
-        {
-            Document doc = Autodesk.AutoCAD.ApplicationServices.Application.DocumentManager.MdiActiveDocument;
-            Editor ed = doc.Editor;
-
-            ed.WriteMessage("hellow worlds");
-        }
 
         [CommandMethod("extractJSON")]
         public void ExtractDrawingJson()
@@ -101,7 +79,7 @@ namespace HelloWorldNET
                     tr.Commit();
                 }
 
-                // Convert to JSON (using simple string building since Json.NET may not be available)
+                // Convert to JSON
                 string json = ConvertToJson(entities);
 
                 // Save to file
@@ -109,12 +87,81 @@ namespace HelloWorldNET
                 File.WriteAllText(outputPath, json);
 
                 ed.WriteMessage($"\nDrawing data extracted to: {outputPath}");
-                Autodesk.AutoCAD.ApplicationServices.Application.ShowAlertDialog($"JSON extracted successfully!\nFile: {outputPath}");
+
+                // Prompt for project_id
+                PromptStringOptions pso = new PromptStringOptions("\nEnter Project ID: ");
+                pso.AllowSpaces = true;
+                PromptResult pr = ed.GetString(pso);
+
+                if (pr.Status != PromptStatus.OK)
+                {
+                    ed.WriteMessage("\nOperation cancelled.");
+                    return;
+                }
+
+                string projectId = pr.StringResult;
+                string drawingName = Path.GetFileNameWithoutExtension(doc.Name);
+
+                // Call the API endpoint
+                ed.WriteMessage("\nSending to API endpoint...");
+                Task.Run(async () =>
+                {
+                    try
+                    {
+                        string response = await CallReviewEndpoint(outputPath, drawingName, projectId);
+                        ed.WriteMessage($"\n\nAPI Response:\n{response}");
+                        Autodesk.AutoCAD.ApplicationServices.Application.ShowAlertDialog($"API Response:\n\n{response}");
+                    }
+                    catch (System.Exception apiEx)
+                    {
+                        ed.WriteMessage($"\nAPI Error: {apiEx.Message}");
+                        Autodesk.AutoCAD.ApplicationServices.Application.ShowAlertDialog($"API Error: {apiEx.Message}");
+                    }
+                });
             }
             catch (System.Exception ex)
             {
                 ed.WriteMessage($"\nError: {ex.Message}");
                 Autodesk.AutoCAD.ApplicationServices.Application.ShowAlertDialog($"Error extracting JSON: {ex.Message}");
+            }
+        }
+
+        private async Task<string> CallReviewEndpoint(string jsonFilePath, string drawingName, string projectId)
+        {
+            using (HttpClient client = new HttpClient())
+            {
+                using (MultipartFormDataContent form = new MultipartFormDataContent())
+                {
+                    // Add JSON file
+                    byte[] fileContent = File.ReadAllBytes(jsonFilePath);
+                    ByteArrayContent fileStream = new ByteArrayContent(fileContent);
+                    fileStream.Headers.Add("Content-Type", "application/json");
+                    form.Add(fileStream, "json_file", Path.GetFileName(jsonFilePath));
+
+                    // Add other form fields
+                    form.Add(new StringContent(drawingName), "drawing_name");
+                    form.Add(new StringContent(projectId), "project_id");
+                    form.Add(new StringContent("google/gemini-3-flash-preview"), "model");
+                    form.Add(new StringContent("true"), "save_report");
+
+                    // Send POST request
+                    HttpResponseMessage response = await client.PostAsync(
+                        "https://sesphase2.backend.testing.env.thelinkai.com/drawings/review",
+                        form);
+
+                    // Read response content
+                    string responseContent = await response.Content.ReadAsStringAsync();
+
+                    // Return formatted response
+                    if (response.IsSuccessStatusCode)
+                    {
+                        return $"Success (Status: {response.StatusCode})\n\n{responseContent}";
+                    }
+                    else
+                    {
+                        return $"Error (Status: {response.StatusCode})\n\n{responseContent}";
+                    }
+                }
             }
         }
 

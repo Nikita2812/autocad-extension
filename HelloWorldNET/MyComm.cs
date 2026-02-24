@@ -89,17 +89,33 @@ namespace HelloWorldNET
                 ed.WriteMessage($"\nDrawing data extracted to: {outputPath}");
 
                 // Prompt for project_id
-                PromptStringOptions pso = new PromptStringOptions("\nEnter Project ID: ");
-                pso.AllowSpaces = true;
-                PromptResult pr = ed.GetString(pso);
+                PromptStringOptions psoProjectId = new PromptStringOptions("\nEnter Project ID (press Enter to skip): ");
+                psoProjectId.AllowSpaces = true;
+                PromptResult prProjectId = ed.GetString(psoProjectId);
 
-                if (pr.Status != PromptStatus.OK)
+                if (prProjectId.Status != PromptStatus.OK)
                 {
                     ed.WriteMessage("\nOperation cancelled.");
                     return;
                 }
 
-                string projectId = pr.StringResult;
+                string projectId = prProjectId.StringResult;
+
+                // Prompt for participant_id
+                PromptStringOptions psoParticipantId = new PromptStringOptions("\nEnter Participant ID (press Enter for default): ");
+                psoParticipantId.AllowSpaces = true;
+                PromptResult prParticipantId = ed.GetString(psoParticipantId);
+
+                if (prParticipantId.Status != PromptStatus.OK)
+                {
+                    ed.WriteMessage("\nOperation cancelled.");
+                    return;
+                }
+
+                string participantId = string.IsNullOrWhiteSpace(prParticipantId.StringResult) 
+                    ? "852821f6-1214-4dae-a35f-0c5a4df09555" 
+                    : prParticipantId.StringResult;
+
                 string drawingName = Path.GetFileNameWithoutExtension(doc.Name);
 
                 // Call the API endpoint
@@ -108,7 +124,7 @@ namespace HelloWorldNET
                 {
                     try
                     {
-                        string response = await CallReviewEndpoint(outputPath, drawingName, projectId);
+                        string response = await CallReviewEndpoint(outputPath, drawingName, projectId, participantId);
                         string formattedResponse = FormatApiResponse(response);
                         ShowScrollableReport(formattedResponse);
                     }
@@ -125,7 +141,7 @@ namespace HelloWorldNET
             }
         }
 
-        private async Task<string> CallReviewEndpoint(string jsonFilePath, string drawingName, string projectId)
+        private async Task<string> CallReviewEndpoint(string jsonFilePath, string drawingName, string projectId, string participantId)
         {
             using (HttpClient client = new HttpClient())
             {
@@ -142,7 +158,7 @@ namespace HelloWorldNET
                     form.Add(new StringContent(projectId), "project_id");
                     form.Add(new StringContent("google/gemini-3-flash-preview"), "model");
                     form.Add(new StringContent("true"), "save_report");
-                    form.Add(new StringContent("852821f6-1214-4dae-a35f-0c5a4df09555"), "participant_id");
+                    form.Add(new StringContent(participantId), "participant_id");
 
                     // Send POST request
                     HttpResponseMessage response = await client.PostAsync(

@@ -1,0 +1,11 @@
+{
+  "api": {
+    "endpoint": "https://sesphase2.backend.testing.env.thelinkai.com/drawings/review",
+    "timeout_seconds": 300,
+    "model": "google/gemini-3-flash-preview",
+    "save_report": true
+  },
+  "defaults": {
+    "participant_id": "852821f6-1214-4dae-a35f-0c5a4df09555"
+  }
+}

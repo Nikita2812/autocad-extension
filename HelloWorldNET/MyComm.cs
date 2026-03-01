@@ -112,24 +112,31 @@ namespace HelloWorldNET
                     return;
                 }
 
+                ConfigManager configMgr = ConfigManager.GetInstance();
                 string participantId = string.IsNullOrWhiteSpace(prParticipantId.StringResult) 
-                    ? "852821f6-1214-4dae-a35f-0c5a4df09555" 
+                    ? configMgr.GetDefaultParticipantId()
                     : prParticipantId.StringResult;
 
                 string drawingName = Path.GetFileNameWithoutExtension(doc.Name);
 
                 // Call the API endpoint
                 ed.WriteMessage("\nSending to API endpoint...");
+                ConfigManager configMgr2 = ConfigManager.GetInstance();
                 Task.Run(async () =>
                 {
                     try
                     {
-                        string response = await CallReviewEndpoint(outputPath, drawingName, projectId, participantId);
+                        ed.WriteMessage($"\nCalling: {configMgr2.GetApiEndpoint()}");
+                        string response = await CallReviewEndpoint(outputPath, drawingName, projectId, participantId, null);
+                        ed.WriteMessage("\nAPI response received. Formatting report...");
                         string formattedResponse = FormatApiResponse(response);
+                        ed.WriteMessage("\nOpening report in browser...");
                         ShowScrollableReport(formattedResponse);
+                        ed.WriteMessage("\nReport opened successfully.");
                     }
                     catch (System.Exception apiEx)
                     {
+                        ed.WriteMessage($"\nAPI Error: {apiEx.Message}\nStackTrace: {apiEx.StackTrace}");
                         Autodesk.AutoCAD.ApplicationServices.Application.ShowAlertDialog($"API Error: {apiEx.Message}");
                     }
                 });
@@ -141,10 +148,24 @@ namespace HelloWorldNET
             }
         }
 
-        private async Task<string> CallReviewEndpoint(string jsonFilePath, string drawingName, string projectId, string participantId)
+        private async Task<string> CallReviewEndpoint(
+            string jsonFilePath,
+            string drawingName,
+            string projectId,
+            string participantId,
+            string apiUrl = null)
         {
+            ConfigManager configMgr = ConfigManager.GetInstance();
+            string endpoint = string.IsNullOrWhiteSpace(apiUrl)
+                ? configMgr.GetApiEndpoint()
+                : apiUrl;
+            string model = configMgr.GetApiModel();
+            int timeoutSeconds = configMgr.GetApiTimeoutSeconds();
+            bool saveReport = configMgr.GetApiSaveReport();
+
             using (HttpClient client = new HttpClient())
             {
+                client.Timeout = System.TimeSpan.FromSeconds(timeoutSeconds);
                 using (MultipartFormDataContent form = new MultipartFormDataContent())
                 {
                     // Add JSON file
@@ -154,16 +175,14 @@ namespace HelloWorldNET
                     form.Add(fileStream, "json_file", Path.GetFileName(jsonFilePath));
 
                     // Add other form fields
-                    form.Add(new StringContent(drawingName), "drawing_name");
-                    form.Add(new StringContent(projectId), "project_id");
-                    form.Add(new StringContent("google/gemini-3-flash-preview"), "model");
-                    form.Add(new StringContent("true"), "save_report");
-                    form.Add(new StringContent(participantId), "participant_id");
+                    form.Add(new StringContent(drawingName ?? ""), "drawing_name");
+                    form.Add(new StringContent(projectId ?? ""), "project_id");
+                    form.Add(new StringContent(model), "model");
+                    form.Add(new StringContent(saveReport.ToString().ToLower()), "save_report");
+                    form.Add(new StringContent(participantId ?? ""), "participant_id");
 
                     // Send POST request
-                    HttpResponseMessage response = await client.PostAsync(
-                        "https://sesphase2.backend.testing.env.thelinkai.com/drawings/review",
-                        form);
+                    HttpResponseMessage response = await client.PostAsync(endpoint, form);
 
                     // Read response content
                     string responseContent = await response.Content.ReadAsStringAsync();
@@ -905,6 +924,206 @@ namespace HelloWorldNET
                     Autodesk.AutoCAD.ApplicationServices.Application.ShowAlertDialog($"Could not open report: {ex.Message}");
                 }
             }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // SILENT (bridge-driven) command
+        // Reads config from a shared temp JSON file written by the Python bridge,
+        // skips all interactive prompts, and writes the API result back to a
+        // shared temp JSON file that the Python bridge polls for.
+        //
+        // Shared file paths must match the constants in bridge_server.py:
+        //   Request : %TEMP%\ai_review\request.json
+        //   Result  : %TEMP%\ai_review\result.json
+        // ─────────────────────────────────────────────────────────────────────
+
+        private static readonly string SilentRequestPath =
+            Path.Combine(Path.GetTempPath(), "ai_review", "request.json");
+
+        private static readonly string SilentResultPath =
+            Path.Combine(Path.GetTempPath(), "ai_review", "result.json");
+
+        [CommandMethod("extractJSONSilent")]
+        public void ExtractDrawingJsonSilent()
+        {
+            Document doc = Autodesk.AutoCAD.ApplicationServices.Application.DocumentManager.MdiActiveDocument;
+            Editor ed = doc.Editor;
+            Database db = doc.Database;
+
+            try
+            {
+                // ── 1. Read request config written by Python bridge ──────────
+                if (!File.Exists(SilentRequestPath))
+                {
+                    ed.WriteMessage($"\nSilent review: request file not found: {SilentRequestPath}");
+                    WriteSilentResult(false, "Request config file not found.", null);
+                    return;
+                }
+
+                string configJson = File.ReadAllText(SilentRequestPath).Trim();
+                Dictionary<string, object> config = ParseJsonObject(configJson);
+
+                ConfigManager configMgr = ConfigManager.GetInstance();
+                string apiUrl         = GetSilentConfigValue(config, "api_url",         null);
+                string projectId      = GetSilentConfigValue(config, "project_id",      "");
+                string participantId  = GetSilentConfigValue(config, "participant_id",  configMgr.GetDefaultParticipantId());
+                string model          = GetSilentConfigValue(config, "model",           configMgr.GetApiModel());
+                string drawingNameCfg = GetSilentConfigValue(config, "drawing_name",    null);
+
+                // ── 2. Extract entities ──────────────────────────────────────
+                List<Dictionary<string, object>> entities = new List<Dictionary<string, object>>();
+                using (Transaction tr = db.TransactionManager.StartTransaction())
+                {
+                    BlockTable bt   = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+                    BlockTableRecord btr = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
+
+                    foreach (ObjectId objId in btr)
+                    {
+                        Entity entity = (Entity)tr.GetObject(objId, OpenMode.ForRead);
+                        Dictionary<string, object> entityData = new Dictionary<string, object>
+                        {
+                            { "Type",     entity.GetType().Name },
+                            { "Layer",    entity.Layer },
+                            { "Color",    entity.ColorIndex.ToString() },
+                            { "Linetype", entity.Linetype }
+                        };
+
+                        if (entity is Line line)
+                        {
+                            entityData["StartPoint"] = new { X = line.StartPoint.X, Y = line.StartPoint.Y, Z = line.StartPoint.Z };
+                            entityData["EndPoint"]   = new { X = line.EndPoint.X,   Y = line.EndPoint.Y,   Z = line.EndPoint.Z   };
+                        }
+                        else if (entity is Circle circle)
+                        {
+                            entityData["Center"] = new { X = circle.Center.X, Y = circle.Center.Y, Z = circle.Center.Z };
+                            entityData["Radius"] = circle.Radius;
+                        }
+                        else if (entity is Arc arc)
+                        {
+                            entityData["Center"]     = new { X = arc.Center.X, Y = arc.Center.Y, Z = arc.Center.Z };
+                            entityData["Radius"]     = arc.Radius;
+                            entityData["StartAngle"] = arc.StartAngle;
+                            entityData["EndAngle"]   = arc.EndAngle;
+                        }
+                        else if (entity is Polyline polyline)
+                        {
+                            List<Dictionary<string, double>> points = new List<Dictionary<string, double>>();
+                            for (int i = 0; i < polyline.NumberOfVertices; i++)
+                            {
+                                Point3d pt = polyline.GetPoint3dAt(i);
+                                points.Add(new Dictionary<string, double> { { "X", pt.X }, { "Y", pt.Y }, { "Z", pt.Z } });
+                            }
+                            entityData["Vertices"] = points;
+                        }
+
+                        entities.Add(entityData);
+                    }
+                    tr.Commit();
+                }
+
+                // ── 3. Write drawing_data.json next to the .dwg ─────────────
+                string json = ConvertToJson(entities);
+                string outputPath = Path.Combine(Path.GetDirectoryName(doc.Name), "drawing_data.json");
+                File.WriteAllText(outputPath, json);
+                ed.WriteMessage($"\nSilent: {entities.Count} entities extracted → {outputPath}");
+
+                string drawingName = drawingNameCfg ?? Path.GetFileNameWithoutExtension(doc.Name);
+
+                // ── 4. Fire API call asynchronously; write result on completion
+                ed.WriteMessage("\nSilent: Calling review API...");
+                ed.WriteMessage($"\nSilent: Results will be written to: {SilentResultPath}");
+                Task.Run(async () =>
+                {
+                    try
+                    {
+                        ed.WriteMessage("\nSilent: API request started...");
+                        string response = await CallReviewEndpoint(
+                            outputPath, drawingName, projectId, participantId, apiUrl);
+                        ed.WriteMessage("\nSilent: API response received, writing result...");
+                        WriteSilentResult(true, "Review completed successfully.", response);
+                        ed.WriteMessage($"\nSilent: Result written to: {SilentResultPath}");
+                    }
+                    catch (System.Exception apiEx)
+                    {
+                        ed.WriteMessage($"\nSilent: API failed with error: {apiEx.Message}");
+                        WriteSilentResult(false, $"API error: {apiEx.Message}", null);
+                        ed.WriteMessage($"\nSilent: Error result written to: {SilentResultPath}");
+                    }
+                });
+            }
+            catch (System.Exception ex)
+            {
+                ed.WriteMessage($"\nSilent review error: {ex.Message}");
+                WriteSilentResult(false, $"Plugin error: {ex.Message}", null);
+            }
+        }
+
+        /// <summary>Write the review result to the shared temp result file.</summary>
+        private void WriteSilentResult(bool success, string message, string apiResponseJson)
+        {
+            try
+            {
+                string dirPath = Path.GetDirectoryName(SilentResultPath);
+                if (!Directory.Exists(dirPath))
+                {
+                    Directory.CreateDirectory(dirPath);
+                }
+
+                StringBuilder sb = new StringBuilder();
+                sb.AppendLine("{");
+                sb.AppendLine($"  \"success\": {success.ToString().ToLower()},");
+                sb.AppendLine($"  \"message\": \"{EscapeJsonString(message)}\",");
+                sb.AppendLine($"  \"timestamp\": \"{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ssZ}\",");
+                if (!string.IsNullOrEmpty(apiResponseJson))
+                    sb.AppendLine($"  \"api_response\": {apiResponseJson}");
+                else
+                    sb.AppendLine("  \"api_response\": null");
+                sb.AppendLine("}");
+
+                // Write with UTF-8 without BOM to avoid json.loads() parse errors in Python
+                var utf8NoBom = new System.Text.UTF8Encoding(false);
+                File.WriteAllText(SilentResultPath, sb.ToString(), utf8NoBom);
+
+                // Verify file was written
+                if (File.Exists(SilentResultPath))
+                {
+                    long fileSize = new FileInfo(SilentResultPath).Length;
+                    Document doc = Autodesk.AutoCAD.ApplicationServices.Application.DocumentManager.MdiActiveDocument;
+                    if (doc != null)
+                    {
+                        doc.Editor.WriteMessage($"\nSilent: Result file confirmed ({fileSize} bytes): {SilentResultPath}");
+                    }
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Document doc = Autodesk.AutoCAD.ApplicationServices.Application.DocumentManager.MdiActiveDocument;
+                if (doc != null)
+                {
+                    doc.Editor.WriteMessage($"\nSilent: ERROR writing result file: {ex.Message}");
+                }
+            }
+        }
+
+        private static string EscapeJsonString(string value)
+        {
+            if (value == null) return "";
+            return value
+                .Replace("\\", "\\\\")
+                .Replace("\"", "\\\"")
+                .Replace("\r", "\\r")
+                .Replace("\n", "\\n");
+        }
+
+        private static string GetSilentConfigValue(
+            Dictionary<string, object> config, string key, string defaultValue)
+        {
+            if (config != null && config.ContainsKey(key) && config[key] != null)
+            {
+                string val = config[key].ToString();
+                return string.IsNullOrWhiteSpace(val) ? defaultValue : val;
+            }
+            return defaultValue;
         }
     }
 }

@@ -927,6 +927,288 @@ namespace HelloWorldNET
         }
 
         // ─────────────────────────────────────────────────────────────────────
+        // EXTRACT ONLY (bridge-driven) command
+        // Reads drawing path and uuid from a shared temp JSON file,
+        // extracts entities to JSON, and writes the JSON file path back to
+        // a shared temp JSON file that the Python bridge polls for.
+        //
+        // Request file: %TEMP%\ai_review\extract_request.json
+        // Result file : %TEMP%\ai_review\extract_result.json
+        // ─────────────────────────────────────────────────────────────────────
+
+        private static readonly string ExtractRequestPath =
+            Path.Combine(Path.GetTempPath(), "ai_review", "extract_request.json");
+
+        private static readonly string ExtractResultPath =
+            Path.Combine(Path.GetTempPath(), "ai_review", "extract_result.json");
+
+        [CommandMethod("extractJSONOnly")]
+        public void ExtractDrawingJsonOnly()
+        {
+            string logPath = null;
+            Document doc = null;
+            Editor ed = null;
+
+            try
+            {
+                // Try to get the active document for user feedback
+                try
+                {
+                    doc = Autodesk.AutoCAD.ApplicationServices.Application.DocumentManager.MdiActiveDocument;
+                    if (doc != null)
+                        ed = doc.Editor;
+                }
+                catch { }
+
+                // ── 0. Initialize logging ────────────────────────────────────
+                logPath = Path.Combine(Path.GetTempPath(), "ai_review", $"extract_log_{DateTime.UtcNow:yyyy_MM_dd_HH_mm_ss_fff}.txt");
+                string logDir = Path.GetDirectoryName(logPath);
+                if (!Directory.Exists(logDir))
+                    Directory.CreateDirectory(logDir);
+
+                string startMsg = $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Starting extractJSONOnly command";
+                LogToFile(logPath, startMsg);
+                if (ed != null) ed.WriteMessage($"\n{startMsg}");
+
+                // ── 1. Read request config written by Python bridge ──────────
+                LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Checking for request file: {ExtractRequestPath}");
+                if (ed != null) ed.WriteMessage($"\nChecking for request file: {ExtractRequestPath}");
+
+                if (!File.Exists(ExtractRequestPath))
+                {
+                    string errMsg = "Request config file not found.";
+                    LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] ERROR: {errMsg}");
+                    if (ed != null) ed.WriteMessage($"\nERROR: {errMsg}");
+                    if (ed != null) ed.WriteMessage($"\nLog: {logPath}");
+                    if (ed != null) ed.WriteMessage($"\nResult: {ExtractResultPath}");
+                    WriteExtractResult(false, errMsg, null, null);
+                    return;
+                }
+
+                LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Reading request configuration from: {ExtractRequestPath}");
+                string configJson = File.ReadAllText(ExtractRequestPath).Trim();
+                LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Request config loaded ({configJson.Length} characters)");
+                if (ed != null) ed.WriteMessage($"\nRequest config loaded ({configJson.Length} characters)");
+
+                Dictionary<string, object> config = ParseJsonObject(configJson);
+                LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Configuration parsed successfully");
+                if (ed != null) ed.WriteMessage($"\nConfiguration parsed successfully");
+
+                string drawingPath = GetSilentConfigValue(config, "drawing_path", null);
+                string uuid = GetSilentConfigValue(config, "uuid", null);
+
+                LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Drawing path: {drawingPath}");
+                LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] UUID: {(string.IsNullOrEmpty(uuid) ? "(none)" : uuid)}");
+                if (ed != null) ed.WriteMessage($"\nDrawing: {drawingPath}");
+
+                if (string.IsNullOrWhiteSpace(drawingPath))
+                {
+                    string errMsg = "drawing_path not provided in request.";
+                    LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] ERROR: {errMsg}");
+                    if (ed != null) ed.WriteMessage($"\nERROR: {errMsg}");
+                    WriteExtractResult(false, errMsg, null, null);
+                    return;
+                }
+
+                if (!File.Exists(drawingPath))
+                {
+                    string errMsg = $"Drawing file not found: {drawingPath}";
+                    LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] ERROR: {errMsg}");
+                    if (ed != null) ed.WriteMessage($"\nERROR: {errMsg}");
+                    WriteExtractResult(false, errMsg, null, null);
+                    return;
+                }
+
+                LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Drawing file verified, size: {new FileInfo(drawingPath).Length} bytes");
+                if (ed != null) ed.WriteMessage($"\nDrawing verified ({new FileInfo(drawingPath).Length} bytes)");
+
+                // ── 2. Open the drawing and extract entities ─────────────────
+                List<Dictionary<string, object>> entities = new List<Dictionary<string, object>>();
+
+                try
+                {
+                    LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Opening drawing document...");
+                    if (ed != null) ed.WriteMessage($"\nOpening drawing...");
+                    Document openDoc = Autodesk.AutoCAD.ApplicationServices.Application.DocumentManager.Open(
+                        drawingPath, false);
+                    Database db = openDoc.Database;
+                    LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Document opened successfully");
+                    if (ed != null) ed.WriteMessage($"\nDocument opened successfully");
+
+                    LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Starting entity extraction from ModelSpace...");
+                    if (ed != null) ed.WriteMessage($"\nExtracting entities from ModelSpace...");
+
+                    using (Transaction tr = db.TransactionManager.StartTransaction())
+                    {
+                        BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+                        BlockTableRecord btr = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
+
+                        LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Beginning ModelSpace entity extraction...");
+
+                        int entityCount = 0;
+                        foreach (ObjectId objId in btr)
+                        {
+                            Entity entity = (Entity)tr.GetObject(objId, OpenMode.ForRead);
+                            Dictionary<string, object> entityData = new Dictionary<string, object>
+                            {
+                                { "Type",     entity.GetType().Name },
+                                { "Layer",    entity.Layer },
+                                { "Color",    entity.ColorIndex.ToString() },
+                                { "Linetype", entity.Linetype }
+                            };
+
+                            if (entity is Line line)
+                            {
+                                entityData["StartPoint"] = new { X = line.StartPoint.X, Y = line.StartPoint.Y, Z = line.StartPoint.Z };
+                                entityData["EndPoint"]   = new { X = line.EndPoint.X,   Y = line.EndPoint.Y,   Z = line.EndPoint.Z   };
+                            }
+                            else if (entity is Circle circle)
+                            {
+                                entityData["Center"] = new { X = circle.Center.X, Y = circle.Center.Y, Z = circle.Center.Z };
+                                entityData["Radius"] = circle.Radius;
+                            }
+                            else if (entity is Arc arc)
+                            {
+                                entityData["Center"]     = new { X = arc.Center.X, Y = arc.Center.Y, Z = arc.Center.Z };
+                                entityData["Radius"]     = arc.Radius;
+                                entityData["StartAngle"] = arc.StartAngle;
+                                entityData["EndAngle"]   = arc.EndAngle;
+                            }
+                            else if (entity is Polyline polyline)
+                            {
+                                List<Dictionary<string, double>> points = new List<Dictionary<string, double>>();
+                                for (int i = 0; i < polyline.NumberOfVertices; i++)
+                                {
+                                    Point3d pt = polyline.GetPoint3dAt(i);
+                                    points.Add(new Dictionary<string, double> { { "X", pt.X }, { "Y", pt.Y }, { "Z", pt.Z } });
+                                }
+                                entityData["Vertices"] = points;
+                            }
+
+                            entities.Add(entityData);
+                            entityCount++;
+
+                            if (entityCount % 10 == 0)
+                                LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Extracted {entityCount} entities...");
+                        }
+
+                        tr.Commit();
+                        LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Transaction committed. Total entities extracted: {entityCount}");
+                        if (ed != null) ed.WriteMessage($"\nExtracted {entityCount} entities");
+                    }
+
+                    LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Closing document...");
+                    openDoc.CloseAndDiscard();
+                    LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Document closed");
+                    if (ed != null) ed.WriteMessage($"\nDocument closed");
+                }
+                catch (System.Exception ex)
+                {
+                    string errMsg = $"Failed to extract from drawing: {ex.Message}";
+                    LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] EXCEPTION: {errMsg}\nStackTrace: {ex.StackTrace}");
+                    if (ed != null) ed.WriteMessage($"\nEXCEPTION: {errMsg}");
+                    WriteExtractResult(false, errMsg, null, null);
+                    return;
+                }
+
+                // ── 3. Convert to JSON ───────────────────────────────────────
+                LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Converting {entities.Count} entities to JSON...");
+                if (ed != null) ed.WriteMessage($"\nConverting to JSON...");
+                string json = ConvertToJson(entities);
+                LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] JSON conversion complete ({json.Length} characters)");
+                if (ed != null) ed.WriteMessage($"\nJSON created ({json.Length} characters)");
+
+                // ── 4. Save to output file ───────────────────────────────────
+                string outputDir = Path.GetDirectoryName(drawingPath);
+                string fileName = string.IsNullOrWhiteSpace(uuid) 
+                    ? "drawing_data.json" 
+                    : $"drawing_data_{uuid}.json";
+                string outputPath = Path.Combine(outputDir, fileName);
+
+                LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Writing JSON to: {outputPath}");
+                if (ed != null) ed.WriteMessage($"\nWriting JSON to: {outputPath}");
+                File.WriteAllText(outputPath, json);
+                LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] JSON file written successfully ({new FileInfo(outputPath).Length} bytes)");
+                if (ed != null) ed.WriteMessage($"\nJSON file written ({new FileInfo(outputPath).Length} bytes)");
+
+                // ── 5. Write success result with JSON path ───────────────────
+                LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Writing extraction result to: {ExtractResultPath}");
+                WriteExtractResult(true, $"Extracted {entities.Count} entities.", outputPath, json);
+                LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Extraction completed successfully");
+                if (ed != null) ed.WriteMessage($"\nExtraction completed successfully!");
+                LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Log saved to: {logPath}");
+                if (ed != null) ed.WriteMessage($"\nLog: {logPath}");
+            }
+            catch (System.Exception ex)
+            {
+                string errMsg = $"Extraction error: {ex.Message}";
+                if (logPath != null)
+                    LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] FATAL EXCEPTION: {errMsg}\nStackTrace: {ex.StackTrace}");
+                WriteExtractResult(false, errMsg, null, null);
+                if (ed != null) ed.WriteMessage($"\nFATAL ERROR: {errMsg}");
+                if (logPath != null && ed != null)
+                    ed.WriteMessage($"\nLog: {logPath}\nResult: {ExtractResultPath}");
+            }
+        }
+
+        /// <summary>Write progress message to a log file for debugging.</summary>
+        private void LogToFile(string logPath, string message)
+        {
+            try
+            {
+                string logDir = Path.GetDirectoryName(logPath);
+                if (!Directory.Exists(logDir))
+                    Directory.CreateDirectory(logDir);
+
+                File.AppendAllText(logPath, message + Environment.NewLine);
+                System.Diagnostics.Debug.WriteLine(message);
+            }
+            catch
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to write to log: {message}");
+            }
+        }
+
+        /// <summary>Write the extraction result to the shared temp result file.</summary>
+        private void WriteExtractResult(bool success, string message, string jsonFilePath, string jsonContent)
+        {
+            try
+            {
+                string dirPath = Path.GetDirectoryName(ExtractResultPath);
+                if (!Directory.Exists(dirPath))
+                {
+                    Directory.CreateDirectory(dirPath);
+                }
+
+                StringBuilder sb = new StringBuilder();
+                sb.AppendLine("{");
+                sb.AppendLine($"  \"success\": {success.ToString().ToLower()},");
+                sb.AppendLine($"  \"message\": \"{EscapeJsonString(message)}\",");
+                sb.AppendLine($"  \"timestamp\": \"{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ssZ}\",");
+
+                if (!string.IsNullOrEmpty(jsonFilePath))
+                    sb.AppendLine($"  \"json_path\": \"{EscapeJsonString(jsonFilePath)}\",");
+                else
+                    sb.AppendLine("  \"json_path\": null,");
+
+                if (!string.IsNullOrEmpty(jsonContent))
+                    sb.AppendLine($"  \"json_content\": {jsonContent}");
+                else
+                    sb.AppendLine("  \"json_content\": null");
+
+                sb.AppendLine("}");
+
+                var utf8NoBom = new System.Text.UTF8Encoding(false);
+                File.WriteAllText(ExtractResultPath, sb.ToString(), utf8NoBom);
+            }
+            catch (System.Exception ex)
+            {
+                // Silently fail to prevent recursion
+                System.Diagnostics.Debug.WriteLine($"Error writing extract result: {ex.Message}");
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
         // SILENT (bridge-driven) command
         // Reads config from a shared temp JSON file written by the Python bridge,
         // skips all interactive prompts, and writes the API result back to a
@@ -1039,8 +1321,23 @@ namespace HelloWorldNET
                         ed.WriteMessage("\nSilent: API request started...");
                         string response = await CallReviewEndpoint(
                             outputPath, drawingName, projectId, participantId, apiUrl);
-                        ed.WriteMessage("\nSilent: API response received, writing result...");
-                        WriteSilentResult(true, "Review completed successfully.", response);
+                        ed.WriteMessage("\nSilent: API response received, checking for errors...");
+
+                        // Check if response contains error information about llm_review
+                        Dictionary<string, object> apiResponse = ParseJson(response);
+                        string errorMessage = ExtractApiErrorMessage(apiResponse);
+
+                        if (!string.IsNullOrEmpty(errorMessage))
+                        {
+                            ed.WriteMessage($"\nSilent: API returned error: {errorMessage}");
+                            WriteSilentResult(false, errorMessage, response);
+                        }
+                        else
+                        {
+                            ed.WriteMessage("\nSilent: API response successful, writing result...");
+                            WriteSilentResult(true, "Review completed successfully.", response);
+                        }
+
                         ed.WriteMessage($"\nSilent: Result written to: {SilentResultPath}");
                     }
                     catch (System.Exception apiEx)
@@ -1124,6 +1421,62 @@ namespace HelloWorldNET
                 return string.IsNullOrWhiteSpace(val) ? defaultValue : val;
             }
             return defaultValue;
+        }
+
+        /// <summary>
+        /// Extracts error messages from the API response.
+        /// Checks for error field, and nested error information in llm_review or other sections.
+        /// </summary>
+        private string ExtractApiErrorMessage(Dictionary<string, object> apiResponse)
+        {
+            if (apiResponse == null || apiResponse.Count == 0)
+                return null;
+
+            // Check for top-level error field
+            if (apiResponse.ContainsKey("error") && apiResponse["error"] != null)
+            {
+                string errorVal = apiResponse["error"].ToString();
+                if (!string.IsNullOrWhiteSpace(errorVal))
+                    return $"API Error: {errorVal}";
+            }
+
+            // Check for success=false
+            if (apiResponse.ContainsKey("success") && apiResponse["success"] != null)
+            {
+                string successVal = apiResponse["success"].ToString().ToLower();
+                if (successVal == "false")
+                {
+                    if (apiResponse.ContainsKey("message") && apiResponse["message"] != null)
+                    {
+                        string msg = apiResponse["message"].ToString();
+                        if (!string.IsNullOrWhiteSpace(msg))
+                            return msg;
+                    }
+                    return "API returned failure status";
+                }
+            }
+
+            // Check for error in geometric_analysis
+            if (apiResponse.ContainsKey("geometric_analysis") && apiResponse["geometric_analysis"] is Dictionary<string, object> geoAnalysis)
+            {
+                if (geoAnalysis.ContainsKey("error") && geoAnalysis["error"] != null)
+                {
+                    string errorVal = geoAnalysis["error"].ToString();
+                    if (!string.IsNullOrWhiteSpace(errorVal))
+                        return $"Geometric Analysis Error: {errorVal}";
+                }
+            }
+
+            // Check for error in llm_review section
+            if (apiResponse.ContainsKey("llm_review_error") && apiResponse["llm_review_error"] != null)
+            {
+                string errorVal = apiResponse["llm_review_error"].ToString();
+                if (!string.IsNullOrWhiteSpace(errorVal))
+                    return $"LLM Review Error: {errorVal}";
+            }
+
+            // No error found
+            return null;
         }
     }
 }

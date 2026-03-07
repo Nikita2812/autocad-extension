@@ -62,6 +62,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="config.json" />
+    <None Include="EXTRACT_JSON_ONLY_DOCS.md" />
     <None Include="REFACTORING_NOTES.md" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

@@ -72,6 +72,46 @@ namespace HelloWorldNET
                             }
                             entityData["Vertices"] = points;
                         }
+                        else if (entity is DBText text)
+                        {
+                            entityData["Content"] = text.TextString;
+                            entityData["Position"] = new { X = text.Position.X, Y = text.Position.Y, Z = text.Position.Z };
+                            entityData["Height"] = text.Height;
+                            entityData["Rotation"] = text.Rotation;
+                        }
+                        else if (entity is BlockReference blockRef)
+                        {
+                            entityData["Position"] = new { X = blockRef.Position.X, Y = blockRef.Position.Y, Z = blockRef.Position.Z };
+                            entityData["BlockName"] = blockRef.Name;
+                            entityData["Rotation"] = blockRef.Rotation;
+                            entityData["ScaleX"] = blockRef.ScaleFactors.X;
+                            entityData["ScaleY"] = blockRef.ScaleFactors.Y;
+                            entityData["ScaleZ"] = blockRef.ScaleFactors.Z;
+
+                            // Extract attributes
+                            List<Dictionary<string, object>> attributes = new List<Dictionary<string, object>>();
+                            foreach (ObjectId attId in blockRef.AttributeCollection)
+                            {
+                                try
+                                {
+                                    AttributeReference attRef = (AttributeReference)tr.GetObject(attId, OpenMode.ForRead);
+                                    attributes.Add(new Dictionary<string, object>
+                                    {
+                                        { "Tag", attRef.Tag },
+                                        { "Value", attRef.TextString }
+                                    });
+                                }
+                                catch { }
+                            }
+                            if (attributes.Count > 0)
+                                entityData["Attributes"] = attributes;
+                        }
+                        else if (entity is MText mtext)
+                        {
+                            entityData["Content"] = mtext.Text;
+                            entityData["Position"] = new { X = mtext.Location.X, Y = mtext.Location.Y, Z = mtext.Location.Z };
+                            entityData["Height"] = mtext.Height;
+                        }
 
                         entities.Add(entityData);
                     }

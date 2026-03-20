@@ -1048,48 +1048,95 @@ namespace HelloWorldNET
                         int entityCount = 0;
                         foreach (ObjectId objId in btr)
                         {
-                            Entity entity = (Entity)tr.GetObject(objId, OpenMode.ForRead);
-                            Dictionary<string, object> entityData = new Dictionary<string, object>
+                            try
                             {
-                                { "Type",     entity.GetType().Name },
-                                { "Layer",    entity.Layer },
-                                { "Color",    entity.ColorIndex.ToString() },
-                                { "Linetype", entity.Linetype }
-                            };
-
-                            if (entity is Line line)
-                            {
-                                entityData["StartPoint"] = new { X = line.StartPoint.X, Y = line.StartPoint.Y, Z = line.StartPoint.Z };
-                                entityData["EndPoint"]   = new { X = line.EndPoint.X,   Y = line.EndPoint.Y,   Z = line.EndPoint.Z   };
-                            }
-                            else if (entity is Circle circle)
-                            {
-                                entityData["Center"] = new { X = circle.Center.X, Y = circle.Center.Y, Z = circle.Center.Z };
-                                entityData["Radius"] = circle.Radius;
-                            }
-                            else if (entity is Arc arc)
-                            {
-                                entityData["Center"]     = new { X = arc.Center.X, Y = arc.Center.Y, Z = arc.Center.Z };
-                                entityData["Radius"]     = arc.Radius;
-                                entityData["StartAngle"] = arc.StartAngle;
-                                entityData["EndAngle"]   = arc.EndAngle;
-                            }
-                            else if (entity is Polyline polyline)
-                            {
-                                List<Dictionary<string, double>> points = new List<Dictionary<string, double>>();
-                                for (int i = 0; i < polyline.NumberOfVertices; i++)
+                                Entity entity = (Entity)tr.GetObject(objId, OpenMode.ForRead);
+                                Dictionary<string, object> entityData = new Dictionary<string, object>
                                 {
-                                    Point3d pt = polyline.GetPoint3dAt(i);
-                                    points.Add(new Dictionary<string, double> { { "X", pt.X }, { "Y", pt.Y }, { "Z", pt.Z } });
+                                    { "Type",     entity.GetType().Name },
+                                    { "Layer",    entity.Layer },
+                                    { "Color",    entity.ColorIndex.ToString() },
+                                    { "Linetype", entity.Linetype }
+                                };
+
+                                if (entity is Line line)
+                                {
+                                    entityData["StartPoint"] = new { X = line.StartPoint.X, Y = line.StartPoint.Y, Z = line.StartPoint.Z };
+                                    entityData["EndPoint"]   = new { X = line.EndPoint.X,   Y = line.EndPoint.Y,   Z = line.EndPoint.Z   };
                                 }
-                                entityData["Vertices"] = points;
+                                else if (entity is Circle circle)
+                                {
+                                    entityData["Center"] = new { X = circle.Center.X, Y = circle.Center.Y, Z = circle.Center.Z };
+                                    entityData["Radius"] = circle.Radius;
+                                }
+                                else if (entity is Arc arc)
+                                {
+                                    entityData["Center"]     = new { X = arc.Center.X, Y = arc.Center.Y, Z = arc.Center.Z };
+                                    entityData["Radius"]     = arc.Radius;
+                                    entityData["StartAngle"] = arc.StartAngle;
+                                    entityData["EndAngle"]   = arc.EndAngle;
+                                }
+                                else if (entity is Polyline polyline)
+                                {
+                                    List<Dictionary<string, double>> points = new List<Dictionary<string, double>>();
+                                    for (int i = 0; i < polyline.NumberOfVertices; i++)
+                                    {
+                                        Point3d pt = polyline.GetPoint3dAt(i);
+                                        points.Add(new Dictionary<string, double> { { "X", pt.X }, { "Y", pt.Y }, { "Z", pt.Z } });
+                                    }
+                                    entityData["Vertices"] = points;
+                                }
+                                else if (entity is DBText text)
+                                {
+                                    entityData["Content"] = text.TextString;
+                                    entityData["Position"] = new { X = text.Position.X, Y = text.Position.Y, Z = text.Position.Z };
+                                    entityData["Height"] = text.Height;
+                                    entityData["Rotation"] = text.Rotation;
+                                }
+                                else if (entity is BlockReference blockRef)
+                                {
+                                    entityData["Position"] = new { X = blockRef.Position.X, Y = blockRef.Position.Y, Z = blockRef.Position.Z };
+                                    entityData["BlockName"] = blockRef.Name;
+                                    entityData["Rotation"] = blockRef.Rotation;
+                                    entityData["ScaleX"] = blockRef.ScaleFactors.X;
+                                    entityData["ScaleY"] = blockRef.ScaleFactors.Y;
+                                    entityData["ScaleZ"] = blockRef.ScaleFactors.Z;
+
+                                    // Extract attributes
+                                    List<Dictionary<string, object>> attributes = new List<Dictionary<string, object>>();
+                                    foreach (ObjectId attId in blockRef.AttributeCollection)
+                                    {
+                                        try
+                                        {
+                                            AttributeReference attRef = (AttributeReference)tr.GetObject(attId, OpenMode.ForRead);
+                                            attributes.Add(new Dictionary<string, object>
+                                            {
+                                                { "Tag", attRef.Tag },
+                                                { "Value", attRef.TextString }
+                                            });
+                                        }
+                                        catch { }
+                                    }
+                                    if (attributes.Count > 0)
+                                        entityData["Attributes"] = attributes;
+                                }
+                                else if (entity is MText mtext)
+                                {
+                                    entityData["Content"] = mtext.Text;
+                                    entityData["Position"] = new { X = mtext.Location.X, Y = mtext.Location.Y, Z = mtext.Location.Z };
+                                    entityData["Height"] = mtext.Height;
+                                }
+
+                                entities.Add(entityData);
+                                entityCount++;
+
+                                if (entityCount % 10 == 0)
+                                    LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Extracted {entityCount} entities...");
                             }
-
-                            entities.Add(entityData);
-                            entityCount++;
-
-                            if (entityCount % 10 == 0)
-                                LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Extracted {entityCount} entities...");
+                            catch (System.Exception entityEx)
+                            {
+                                LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Warning: Failed to extract entity: {entityEx.Message}");
+                            }
                         }
 
                         tr.Commit();
@@ -1261,44 +1308,88 @@ namespace HelloWorldNET
 
                     foreach (ObjectId objId in btr)
                     {
-                        Entity entity = (Entity)tr.GetObject(objId, OpenMode.ForRead);
-                        Dictionary<string, object> entityData = new Dictionary<string, object>
+                        try
                         {
-                            { "Type",     entity.GetType().Name },
-                            { "Layer",    entity.Layer },
-                            { "Color",    entity.ColorIndex.ToString() },
-                            { "Linetype", entity.Linetype }
-                        };
-
-                        if (entity is Line line)
-                        {
-                            entityData["StartPoint"] = new { X = line.StartPoint.X, Y = line.StartPoint.Y, Z = line.StartPoint.Z };
-                            entityData["EndPoint"]   = new { X = line.EndPoint.X,   Y = line.EndPoint.Y,   Z = line.EndPoint.Z   };
-                        }
-                        else if (entity is Circle circle)
-                        {
-                            entityData["Center"] = new { X = circle.Center.X, Y = circle.Center.Y, Z = circle.Center.Z };
-                            entityData["Radius"] = circle.Radius;
-                        }
-                        else if (entity is Arc arc)
-                        {
-                            entityData["Center"]     = new { X = arc.Center.X, Y = arc.Center.Y, Z = arc.Center.Z };
-                            entityData["Radius"]     = arc.Radius;
-                            entityData["StartAngle"] = arc.StartAngle;
-                            entityData["EndAngle"]   = arc.EndAngle;
-                        }
-                        else if (entity is Polyline polyline)
-                        {
-                            List<Dictionary<string, double>> points = new List<Dictionary<string, double>>();
-                            for (int i = 0; i < polyline.NumberOfVertices; i++)
+                            Entity entity = (Entity)tr.GetObject(objId, OpenMode.ForRead);
+                            Dictionary<string, object> entityData = new Dictionary<string, object>
                             {
-                                Point3d pt = polyline.GetPoint3dAt(i);
-                                points.Add(new Dictionary<string, double> { { "X", pt.X }, { "Y", pt.Y }, { "Z", pt.Z } });
-                            }
-                            entityData["Vertices"] = points;
-                        }
+                                { "Type",     entity.GetType().Name },
+                                { "Layer",    entity.Layer },
+                                { "Color",    entity.ColorIndex.ToString() },
+                                { "Linetype", entity.Linetype }
+                            };
 
-                        entities.Add(entityData);
+                            if (entity is Line line)
+                            {
+                                entityData["StartPoint"] = new { X = line.StartPoint.X, Y = line.StartPoint.Y, Z = line.StartPoint.Z };
+                                entityData["EndPoint"]   = new { X = line.EndPoint.X,   Y = line.EndPoint.Y,   Z = line.EndPoint.Z   };
+                            }
+                            else if (entity is Circle circle)
+                            {
+                                entityData["Center"] = new { X = circle.Center.X, Y = circle.Center.Y, Z = circle.Center.Z };
+                                entityData["Radius"] = circle.Radius;
+                            }
+                            else if (entity is Arc arc)
+                            {
+                                entityData["Center"]     = new { X = arc.Center.X, Y = arc.Center.Y, Z = arc.Center.Z };
+                                entityData["Radius"]     = arc.Radius;
+                                entityData["StartAngle"] = arc.StartAngle;
+                                entityData["EndAngle"]   = arc.EndAngle;
+                            }
+                            else if (entity is Polyline polyline)
+                            {
+                                List<Dictionary<string, double>> points = new List<Dictionary<string, double>>();
+                                for (int i = 0; i < polyline.NumberOfVertices; i++)
+                                {
+                                    Point3d pt = polyline.GetPoint3dAt(i);
+                                    points.Add(new Dictionary<string, double> { { "X", pt.X }, { "Y", pt.Y }, { "Z", pt.Z } });
+                                }
+                                entityData["Vertices"] = points;
+                            }
+                            else if (entity is DBText text)
+                            {
+                                entityData["Content"] = text.TextString;
+                                entityData["Position"] = new { X = text.Position.X, Y = text.Position.Y, Z = text.Position.Z };
+                                entityData["Height"] = text.Height;
+                                entityData["Rotation"] = text.Rotation;
+                            }
+                            else if (entity is BlockReference blockRef)
+                            {
+                                entityData["Position"] = new { X = blockRef.Position.X, Y = blockRef.Position.Y, Z = blockRef.Position.Z };
+                                entityData["BlockName"] = blockRef.Name;
+                                entityData["Rotation"] = blockRef.Rotation;
+                                entityData["ScaleX"] = blockRef.ScaleFactors.X;
+                                entityData["ScaleY"] = blockRef.ScaleFactors.Y;
+                                entityData["ScaleZ"] = blockRef.ScaleFactors.Z;
+
+                                // Extract attributes
+                                List<Dictionary<string, object>> attributes = new List<Dictionary<string, object>>();
+                                foreach (ObjectId attId in blockRef.AttributeCollection)
+                                {
+                                    try
+                                    {
+                                        AttributeReference attRef = (AttributeReference)tr.GetObject(attId, OpenMode.ForRead);
+                                        attributes.Add(new Dictionary<string, object>
+                                        {
+                                            { "Tag", attRef.Tag },
+                                            { "Value", attRef.TextString }
+                                        });
+                                    }
+                                    catch { }
+                                }
+                                if (attributes.Count > 0)
+                                    entityData["Attributes"] = attributes;
+                            }
+                            else if (entity is MText mtext)
+                            {
+                                entityData["Content"] = mtext.Text;
+                                entityData["Position"] = new { X = mtext.Location.X, Y = mtext.Location.Y, Z = mtext.Location.Z };
+                                entityData["Height"] = mtext.Height;
+                            }
+
+                            entities.Add(entityData);
+                        }
+                        catch { }
                     }
                     tr.Commit();
                 }

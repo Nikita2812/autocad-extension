@@ -44,6 +44,11 @@ namespace HelloWorldNET
                             { "Linetype", entity.Linetype }
                         };
 
+                        // Extract metadata for text and block entities
+                        Dictionary<string, object> metadata = ExtractEntityMetadata(entity, tr);
+                        if (metadata.Count > 0)
+                            entityData["Metadata"] = metadata;
+
                         // Add geometry info based on entity type
                         if (entity is Line line)
                         {
@@ -74,43 +79,20 @@ namespace HelloWorldNET
                         }
                         else if (entity is DBText text)
                         {
-                            entityData["Content"] = text.TextString;
                             entityData["Position"] = new { X = text.Position.X, Y = text.Position.Y, Z = text.Position.Z };
-                            entityData["Height"] = text.Height;
                             entityData["Rotation"] = text.Rotation;
                         }
                         else if (entity is BlockReference blockRef)
                         {
                             entityData["Position"] = new { X = blockRef.Position.X, Y = blockRef.Position.Y, Z = blockRef.Position.Z };
-                            entityData["BlockName"] = blockRef.Name;
                             entityData["Rotation"] = blockRef.Rotation;
                             entityData["ScaleX"] = blockRef.ScaleFactors.X;
                             entityData["ScaleY"] = blockRef.ScaleFactors.Y;
                             entityData["ScaleZ"] = blockRef.ScaleFactors.Z;
-
-                            // Extract attributes
-                            List<Dictionary<string, object>> attributes = new List<Dictionary<string, object>>();
-                            foreach (ObjectId attId in blockRef.AttributeCollection)
-                            {
-                                try
-                                {
-                                    AttributeReference attRef = (AttributeReference)tr.GetObject(attId, OpenMode.ForRead);
-                                    attributes.Add(new Dictionary<string, object>
-                                    {
-                                        { "Tag", attRef.Tag },
-                                        { "Value", attRef.TextString }
-                                    });
-                                }
-                                catch { }
-                            }
-                            if (attributes.Count > 0)
-                                entityData["Attributes"] = attributes;
                         }
                         else if (entity is MText mtext)
                         {
-                            entityData["Content"] = mtext.Text;
                             entityData["Position"] = new { X = mtext.Location.X, Y = mtext.Location.Y, Z = mtext.Location.Z };
-                            entityData["Height"] = mtext.Height;
                         }
 
                         entities.Add(entityData);
@@ -929,6 +911,66 @@ namespace HelloWorldNET
             return text;
         }
 
+        private Dictionary<string, object> ExtractEntityMetadata(Entity entity, Transaction tr)
+        {
+            Dictionary<string, object> metadata = new Dictionary<string, object>();
+
+            try
+            {
+                if (entity is DBText text)
+                {
+                    metadata["type"] = "text";
+                    metadata["content"] = text.TextString;
+                    metadata["height"] = text.Height;
+                }
+                else if (entity is MText mtext)
+                {
+                    metadata["type"] = "mtext";
+                    metadata["content"] = mtext.Text;
+                    metadata["height"] = mtext.Height;
+                }
+                else if (entity is BlockReference blockRef)
+                {
+                    metadata["type"] = "block";
+
+                    // Get block name (handle dynamic blocks)
+                    string blockName = blockRef.Name;
+                    if (blockRef.IsDynamicBlock)
+                    {
+                        try
+                        {
+                            ObjectId dynamicBlockTableRecord = blockRef.DynamicBlockTableRecord;
+                            if (dynamicBlockTableRecord != ObjectId.Null)
+                            {
+                                BlockTableRecord dynamicBtr = (BlockTableRecord)tr.GetObject(dynamicBlockTableRecord, OpenMode.ForRead);
+                                blockName = dynamicBtr.Name;
+                            }
+                        }
+                        catch { }
+                    }
+                    metadata["block_name"] = blockName;
+
+                    // Extract attributes as a dictionary
+                    Dictionary<string, string> attributesDict = new Dictionary<string, string>();
+                    foreach (ObjectId attId in blockRef.AttributeCollection)
+                    {
+                        try
+                        {
+                            AttributeReference attRef = (AttributeReference)tr.GetObject(attId, OpenMode.ForRead);
+                            attributesDict[attRef.Tag] = attRef.TextString;
+                        }
+                        catch { }
+                    }
+
+                    if (attributesDict.Count > 0)
+                        metadata["attributes"] = attributesDict;
+                }
+            }
+            catch { }
+
+            return metadata;
+        }
+
         private string GetValue(Dictionary<string, object> dict, string key)
         {
             if (dict == null || !dict.ContainsKey(key))
@@ -1099,6 +1141,11 @@ namespace HelloWorldNET
                                     { "Linetype", entity.Linetype }
                                 };
 
+                                // Extract metadata for text and block entities
+                                Dictionary<string, object> metadata = ExtractEntityMetadata(entity, tr);
+                                if (metadata.Count > 0)
+                                    entityData["Metadata"] = metadata;
+
                                 if (entity is Line line)
                                 {
                                     entityData["StartPoint"] = new { X = line.StartPoint.X, Y = line.StartPoint.Y, Z = line.StartPoint.Z };
@@ -1128,43 +1175,20 @@ namespace HelloWorldNET
                                 }
                                 else if (entity is DBText text)
                                 {
-                                    entityData["Content"] = text.TextString;
                                     entityData["Position"] = new { X = text.Position.X, Y = text.Position.Y, Z = text.Position.Z };
-                                    entityData["Height"] = text.Height;
                                     entityData["Rotation"] = text.Rotation;
                                 }
                                 else if (entity is BlockReference blockRef)
                                 {
                                     entityData["Position"] = new { X = blockRef.Position.X, Y = blockRef.Position.Y, Z = blockRef.Position.Z };
-                                    entityData["BlockName"] = blockRef.Name;
                                     entityData["Rotation"] = blockRef.Rotation;
                                     entityData["ScaleX"] = blockRef.ScaleFactors.X;
                                     entityData["ScaleY"] = blockRef.ScaleFactors.Y;
                                     entityData["ScaleZ"] = blockRef.ScaleFactors.Z;
-
-                                    // Extract attributes
-                                    List<Dictionary<string, object>> attributes = new List<Dictionary<string, object>>();
-                                    foreach (ObjectId attId in blockRef.AttributeCollection)
-                                    {
-                                        try
-                                        {
-                                            AttributeReference attRef = (AttributeReference)tr.GetObject(attId, OpenMode.ForRead);
-                                            attributes.Add(new Dictionary<string, object>
-                                            {
-                                                { "Tag", attRef.Tag },
-                                                { "Value", attRef.TextString }
-                                            });
-                                        }
-                                        catch { }
-                                    }
-                                    if (attributes.Count > 0)
-                                        entityData["Attributes"] = attributes;
                                 }
                                 else if (entity is MText mtext)
                                 {
-                                    entityData["Content"] = mtext.Text;
                                     entityData["Position"] = new { X = mtext.Location.X, Y = mtext.Location.Y, Z = mtext.Location.Z };
-                                    entityData["Height"] = mtext.Height;
                                 }
 
                                 entities.Add(entityData);
@@ -1359,6 +1383,11 @@ namespace HelloWorldNET
                                 { "Linetype", entity.Linetype }
                             };
 
+                            // Extract metadata for text and block entities
+                            Dictionary<string, object> metadata = ExtractEntityMetadata(entity, tr);
+                            if (metadata.Count > 0)
+                                entityData["Metadata"] = metadata;
+
                             if (entity is Line line)
                             {
                                 entityData["StartPoint"] = new { X = line.StartPoint.X, Y = line.StartPoint.Y, Z = line.StartPoint.Z };
@@ -1388,43 +1417,20 @@ namespace HelloWorldNET
                             }
                             else if (entity is DBText text)
                             {
-                                entityData["Content"] = text.TextString;
                                 entityData["Position"] = new { X = text.Position.X, Y = text.Position.Y, Z = text.Position.Z };
-                                entityData["Height"] = text.Height;
                                 entityData["Rotation"] = text.Rotation;
                             }
                             else if (entity is BlockReference blockRef)
                             {
                                 entityData["Position"] = new { X = blockRef.Position.X, Y = blockRef.Position.Y, Z = blockRef.Position.Z };
-                                entityData["BlockName"] = blockRef.Name;
                                 entityData["Rotation"] = blockRef.Rotation;
                                 entityData["ScaleX"] = blockRef.ScaleFactors.X;
                                 entityData["ScaleY"] = blockRef.ScaleFactors.Y;
                                 entityData["ScaleZ"] = blockRef.ScaleFactors.Z;
-
-                                // Extract attributes
-                                List<Dictionary<string, object>> attributes = new List<Dictionary<string, object>>();
-                                foreach (ObjectId attId in blockRef.AttributeCollection)
-                                {
-                                    try
-                                    {
-                                        AttributeReference attRef = (AttributeReference)tr.GetObject(attId, OpenMode.ForRead);
-                                        attributes.Add(new Dictionary<string, object>
-                                        {
-                                            { "Tag", attRef.Tag },
-                                            { "Value", attRef.TextString }
-                                        });
-                                    }
-                                    catch { }
-                                }
-                                if (attributes.Count > 0)
-                                    entityData["Attributes"] = attributes;
                             }
                             else if (entity is MText mtext)
                             {
-                                entityData["Content"] = mtext.Text;
                                 entityData["Position"] = new { X = mtext.Location.X, Y = mtext.Location.Y, Z = mtext.Location.Z };
-                                entityData["Height"] = mtext.Height;
                             }
 
                             entities.Add(entityData);

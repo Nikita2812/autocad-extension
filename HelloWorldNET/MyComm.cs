@@ -1105,117 +1105,154 @@ namespace HelloWorldNET
                         BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
                         BlockTableRecord btr = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
 
-                        LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Beginning ModelSpace entity extraction...");
+                        LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Beginning semantic entity extraction with layer filtering...");
+
+                        // Layer whitelisting/blacklisting for intelligent filtering
+                        HashSet<string> allowedLayers = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                        {
+                            "M_EQUIP", "M_PIPE", "M_INSTRUMENT", "C_GRID_CENT", "M_ANNO_TEXT", "TEXT", 
+                            "PECS POWER FIXTURE", "M_LINE", "EQUIPMENT", "ANNOTATIONS"
+                        };
+                        HashSet<string> blockedLayers = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                        {
+                            "0", "FURNITURE", "C_ARCH_DOOR", "TITLE", "DIMENSION", "HATCH", "DEFPOINTS", 
+                            "SB COLUMN", "C_ARCH_WINDOW", "C_ARCH_WALL", "VIEWPORT", "XREF"
+                        };
 
                         int entityCount = 0;
+                        int filteredCount = 0;
                         foreach (ObjectId objId in btr)
                         {
                             try
                             {
                                 Entity entity = (Entity)tr.GetObject(objId, OpenMode.ForRead);
-                                Dictionary<string, object> entityData = new Dictionary<string, object>
+                                string layerName = entity.Layer.ToUpper();
+
+                                // HARD DROP FILTER: Block junk layers that confuse the LLM
+                                if (blockedLayers.Contains(layerName))
                                 {
-                                    { "Type",     entity.GetType().Name },
-                                    { "Layer",    entity.Layer },
-                                    { "Color",    entity.ColorIndex.ToString() },
-                                    { "Linetype", entity.Linetype }
+                                    filteredCount++;
+                                    continue;
+                                }
+
+                                // Initialize the semantic object structure that Python/LLM expects
+                                Dictionary<string, object> semanticEntity = new Dictionary<string, object>
+                                {
+                                    { "layer", entity.Layer },
+                                    { "metadata", new Dictionary<string, object>() }
                                 };
 
-                                if (entity is Line line)
-                                {
-                                    entityData["StartPoint"] = new { X = line.StartPoint.X, Y = line.StartPoint.Y, Z = line.StartPoint.Z };
-                                    entityData["EndPoint"]   = new { X = line.EndPoint.X,   Y = line.EndPoint.Y,   Z = line.EndPoint.Z   };
-                                }
-                                else if (entity is Circle circle)
-                                {
-                                    entityData["Center"] = new { X = circle.Center.X, Y = circle.Center.Y, Z = circle.Center.Z };
-                                    entityData["Radius"] = circle.Radius;
-                                }
-                                else if (entity is Arc arc)
-                                {
-                                    entityData["Center"]     = new { X = arc.Center.X, Y = arc.Center.Y, Z = arc.Center.Z };
-                                    entityData["Radius"]     = arc.Radius;
-                                    entityData["StartAngle"] = arc.StartAngle;
-                                    entityData["EndAngle"]   = arc.EndAngle;
-                                }
-                                else if (entity is Polyline polyline)
-                                {
-                                    List<Dictionary<string, double>> points = new List<Dictionary<string, double>>();
-                                    for (int i = 0; i < polyline.NumberOfVertices; i++)
-                                    {
-                                        Point3d pt = polyline.GetPoint3dAt(i);
-                                        points.Add(new Dictionary<string, double> { { "X", pt.X }, { "Y", pt.Y }, { "Z", pt.Z } });
-                                    }
-                                    entityData["Vertices"] = points;
-                                }
-                                else if (entity is DBText text)
-                                {
-                                    entityData["Content"] = text.TextString;
-                                    entityData["Position"] = new { X = text.Position.X, Y = text.Position.Y, Z = text.Position.Z };
-                                    entityData["Height"] = text.Height;
-                                    entityData["Rotation"] = text.Rotation;
+                                var meta = (Dictionary<string, object>)semanticEntity["metadata"];
 
-                                    // Add semantic metadata
-                                    var metadata = ExtractDBTextMetadata(text, tr);
-                                    if (metadata.Count > 0)
-                                        entityData["metadata"] = metadata;
+                                // --- TEXT CALLOUTS (DBText and MText) ---
+                                if (entity is DBText dbText)
+                                {
+                                    semanticEntity["asset_type"] = "TextCallout";
+                                    semanticEntity["position"] = new { X = dbText.Position.X, Y = dbText.Position.Y, Z = dbText.Position.Z };
+                                    meta["content"] = dbText.TextString;
+                                    meta["height"] = dbText.Height;
+                                    meta["rotation"] = dbText.Rotation;
+
+                                    entities.Add(semanticEntity);
+                                    entityCount++;
                                 }
+                                else if (entity is MText mtext)
+                                {
+                                    semanticEntity["asset_type"] = "TextCallout";
+                                    semanticEntity["position"] = new { X = mtext.Location.X, Y = mtext.Location.Y, Z = mtext.Location.Z };
+
+                                    // Extract and decode MText content
+                                    string rawText = "";
+                                    try { rawText = mtext.Contents ?? ""; }
+                                    catch { rawText = mtext.Text ?? ""; }
+                                    string cleanText = DecodeMTextContent(rawText);
+
+                                    meta["content"] = cleanText;
+                                    meta["height"] = mtext.Height;
+                                    meta["rotation"] = mtext.Rotation;
+
+                                    entities.Add(semanticEntity);
+                                    entityCount++;
+                                }
+
+                                // --- EQUIPMENT BLOCKS ---
                                 else if (entity is BlockReference blockRef)
                                 {
-                                    entityData["Position"] = new { X = blockRef.Position.X, Y = blockRef.Position.Y, Z = blockRef.Position.Z };
-                                    entityData["BlockName"] = blockRef.Name;
-                                    entityData["Rotation"] = blockRef.Rotation;
-                                    entityData["ScaleX"] = blockRef.ScaleFactors.X;
-                                    entityData["ScaleY"] = blockRef.ScaleFactors.Y;
-                                    entityData["ScaleZ"] = blockRef.ScaleFactors.Z;
+                                    semanticEntity["asset_type"] = "Equipment";
+                                    semanticEntity["position"] = new { X = blockRef.Position.X, Y = blockRef.Position.Y, Z = blockRef.Position.Z };
+                                    meta["block_name"] = blockRef.Name;
+                                    meta["rotation"] = blockRef.Rotation;
+                                    meta["scale_x"] = blockRef.ScaleFactors.X;
+                                    meta["scale_y"] = blockRef.ScaleFactors.Y;
+                                    meta["scale_z"] = blockRef.ScaleFactors.Z;
 
-                                    // Extract attributes
-                                    List<Dictionary<string, object>> attributes = new List<Dictionary<string, object>>();
+                                    // CRITICAL: Extract block attributes directly into metadata (unified structure)
                                     foreach (ObjectId attId in blockRef.AttributeCollection)
                                     {
                                         try
                                         {
                                             AttributeReference attRef = (AttributeReference)tr.GetObject(attId, OpenMode.ForRead);
-                                            attributes.Add(new Dictionary<string, object>
-                                            {
-                                                { "Tag", attRef.Tag },
-                                                { "Value", attRef.TextString }
-                                            });
+                                            meta[attRef.Tag] = attRef.TextString; // e.g., "TAG": "P-101A"
                                         }
                                         catch { }
                                     }
-                                    if (attributes.Count > 0)
-                                        entityData["Attributes"] = attributes;
 
-                                    // Add semantic metadata
-                                    var blockMetadata = ExtractBlockReferenceMetadata(blockRef, tr);
-                                    if (blockMetadata.Count > 0)
-                                        entityData["metadata"] = blockMetadata;
+                                    entities.Add(semanticEntity);
+                                    entityCount++;
                                 }
-                                else if (entity is MText mtext)
+
+                                // --- SMART PIPE/GRID SEGMENTS (Only on appropriate layers) ---
+                                else if (entity is Polyline polyline)
                                 {
-                                    // Extract raw text and decode it to remove AutoCAD formatting strings
-                                    string rawText = "";
-                                    try { rawText = mtext.Contents ?? ""; }
-                                    catch { rawText = mtext.Text ?? ""; }
+                                    // Only classify as pipe if explicitly on a piping layer
+                                    if (layerName.Contains("PIPE") || layerName.Contains("M_PIPE"))
+                                    {
+                                        semanticEntity["asset_type"] = "PipeSegment";
+                                        meta["length_mm"] = polyline.Length;
 
-                                    string cleanText = DecodeMTextContent(rawText);
-                                    entityData["Content"] = cleanText;
+                                        List<Dictionary<string, double>> points = new List<Dictionary<string, double>>();
+                                        for (int i = 0; i < polyline.NumberOfVertices; i++)
+                                        {
+                                            Point3d pt = polyline.GetPoint3dAt(i);
+                                            points.Add(new Dictionary<string, double> { { "X", pt.X }, { "Y", pt.Y }, { "Z", pt.Z } });
+                                        }
+                                        meta["vertices"] = points;
 
-                                    entityData["Position"] = new { X = mtext.Location.X, Y = mtext.Location.Y, Z = mtext.Location.Z };
-                                    entityData["Height"] = mtext.Height;
+                                        entities.Add(semanticEntity);
+                                        entityCount++;
+                                    }
+                                    else if (layerName.Contains("GRID") || layerName.Contains("C_GRID"))
+                                    {
+                                        semanticEntity["asset_type"] = "GridLine";
+                                        meta["length_mm"] = polyline.Length;
 
-                                    // Add semantic metadata
-                                    var metadata = ExtractMTextMetadata(mtext, tr);
-                                    if (metadata.Count > 0)
-                                        entityData["metadata"] = metadata;
+                                        List<Dictionary<string, double>> points = new List<Dictionary<string, double>>();
+                                        for (int i = 0; i < polyline.NumberOfVertices; i++)
+                                        {
+                                            Point3d pt = polyline.GetPoint3dAt(i);
+                                            points.Add(new Dictionary<string, double> { { "X", pt.X }, { "Y", pt.Y }, { "Z", pt.Z } });
+                                        }
+                                        meta["vertices"] = points;
+
+                                        entities.Add(semanticEntity);
+                                        entityCount++;
+                                    }
+                                    else
+                                    {
+                                        // Not a pipe, not a grid. Drop it.
+                                        filteredCount++;
+                                        continue;
+                                    }
                                 }
-
-                                entities.Add(entityData);
-                                entityCount++;
+                                // Drop standalone lines, arcs, circles that confuse the LLM
+                                else
+                                {
+                                    filteredCount++;
+                                    continue;
+                                }
 
                                 if (entityCount % 10 == 0)
-                                    LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Extracted {entityCount} entities...");
+                                    LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Extracted {entityCount} semantic entities (filtered {filteredCount})...");
                             }
                             catch (System.Exception entityEx)
                             {
@@ -1224,8 +1261,8 @@ namespace HelloWorldNET
                         }
 
                         tr.Commit();
-                        LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Transaction committed. Total entities extracted: {entityCount}");
-                        if (ed != null) ed.WriteMessage($"\nExtracted {entityCount} entities");
+                        LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Transaction committed. Semantic entities: {entityCount}, Filtered out: {filteredCount}");
+                        if (ed != null) ed.WriteMessage($"\nSemantic extraction: {entityCount} entities (filtered {filteredCount} junk layers)");
                     }
 
                     LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Closing document...");
@@ -1383,121 +1420,155 @@ namespace HelloWorldNET
                 string model          = GetSilentConfigValue(config, "model",           configMgr.GetApiModel());
                 string drawingNameCfg = GetSilentConfigValue(config, "drawing_name",    null);
 
-                // ── 2. Extract entities ──────────────────────────────────────
+                // ── 2. Extract entities with semantic structure and layer filtering ─────────
                 List<Dictionary<string, object>> entities = new List<Dictionary<string, object>>();
                 using (Transaction tr = db.TransactionManager.StartTransaction())
                 {
-                    BlockTable bt   = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+                    BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
                     BlockTableRecord btr = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
 
+                    // Layer whitelisting/blacklisting for intelligent filtering
+                    HashSet<string> allowedLayers = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        "M_EQUIP", "M_PIPE", "M_INSTRUMENT", "C_GRID_CENT", "M_ANNO_TEXT", "TEXT", 
+                        "PECS POWER FIXTURE", "M_LINE", "EQUIPMENT", "ANNOTATIONS"
+                    };
+                    HashSet<string> blockedLayers = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        "0", "FURNITURE", "C_ARCH_DOOR", "TITLE", "DIMENSION", "HATCH", "DEFPOINTS", 
+                        "SB COLUMN", "C_ARCH_WINDOW", "C_ARCH_WALL", "VIEWPORT", "XREF"
+                    };
+
+                    int filteredOut = 0;
                     foreach (ObjectId objId in btr)
                     {
                         try
                         {
                             Entity entity = (Entity)tr.GetObject(objId, OpenMode.ForRead);
-                            Dictionary<string, object> entityData = new Dictionary<string, object>
+                            string layerName = entity.Layer.ToUpper();
+
+                            // HARD DROP FILTER: Block junk layers that confuse the LLM
+                            if (blockedLayers.Contains(layerName))
                             {
-                                { "Type",     entity.GetType().Name },
-                                { "Layer",    entity.Layer },
-                                { "Color",    entity.ColorIndex.ToString() },
-                                { "Linetype", entity.Linetype }
+                                filteredOut++;
+                                continue;
+                            }
+
+                            // Initialize the semantic object structure that Python/LLM expects
+                            Dictionary<string, object> semanticEntity = new Dictionary<string, object>
+                            {
+                                { "layer", entity.Layer },
+                                { "metadata", new Dictionary<string, object>() }
                             };
 
-                            if (entity is Line line)
-                            {
-                                entityData["StartPoint"] = new { X = line.StartPoint.X, Y = line.StartPoint.Y, Z = line.StartPoint.Z };
-                                entityData["EndPoint"]   = new { X = line.EndPoint.X,   Y = line.EndPoint.Y,   Z = line.EndPoint.Z   };
-                            }
-                            else if (entity is Circle circle)
-                            {
-                                entityData["Center"] = new { X = circle.Center.X, Y = circle.Center.Y, Z = circle.Center.Z };
-                                entityData["Radius"] = circle.Radius;
-                            }
-                            else if (entity is Arc arc)
-                            {
-                                entityData["Center"]     = new { X = arc.Center.X, Y = arc.Center.Y, Z = arc.Center.Z };
-                                entityData["Radius"]     = arc.Radius;
-                                entityData["StartAngle"] = arc.StartAngle;
-                                entityData["EndAngle"]   = arc.EndAngle;
-                            }
-                            else if (entity is Polyline polyline)
-                            {
-                                List<Dictionary<string, double>> points = new List<Dictionary<string, double>>();
-                                for (int i = 0; i < polyline.NumberOfVertices; i++)
-                                {
-                                    Point3d pt = polyline.GetPoint3dAt(i);
-                                    points.Add(new Dictionary<string, double> { { "X", pt.X }, { "Y", pt.Y }, { "Z", pt.Z } });
-                                }
-                                entityData["Vertices"] = points;
-                            }
-                            else if (entity is DBText text)
-                            {
-                                entityData["Content"] = text.TextString;
-                                entityData["Position"] = new { X = text.Position.X, Y = text.Position.Y, Z = text.Position.Z };
-                                entityData["Height"] = text.Height;
-                                entityData["Rotation"] = text.Rotation;
+                            var meta = (Dictionary<string, object>)semanticEntity["metadata"];
 
-                                // Add semantic metadata
-                                var metadata = ExtractDBTextMetadata(text, tr);
-                                if (metadata.Count > 0)
-                                    entityData["metadata"] = metadata;
+                            // --- TEXT CALLOUTS (DBText and MText) ---
+                            if (entity is DBText dbText)
+                            {
+                                semanticEntity["asset_type"] = "TextCallout";
+                                semanticEntity["position"] = new { X = dbText.Position.X, Y = dbText.Position.Y, Z = dbText.Position.Z };
+                                meta["content"] = dbText.TextString;
+                                meta["height"] = dbText.Height;
+                                meta["rotation"] = dbText.Rotation;
+
+                                entities.Add(semanticEntity);
                             }
+                            else if (entity is MText mtext)
+                            {
+                                semanticEntity["asset_type"] = "TextCallout";
+                                semanticEntity["position"] = new { X = mtext.Location.X, Y = mtext.Location.Y, Z = mtext.Location.Z };
+
+                                // Extract and decode MText content
+                                string rawText = "";
+                                try { rawText = mtext.Contents ?? ""; }
+                                catch { rawText = mtext.Text ?? ""; }
+                                string cleanText = DecodeMTextContent(rawText);
+
+                                meta["content"] = cleanText;
+                                meta["height"] = mtext.Height;
+                                meta["rotation"] = mtext.Rotation;
+
+                                entities.Add(semanticEntity);
+                            }
+
+                            // --- EQUIPMENT BLOCKS ---
                             else if (entity is BlockReference blockRef)
                             {
-                                entityData["Position"] = new { X = blockRef.Position.X, Y = blockRef.Position.Y, Z = blockRef.Position.Z };
-                                entityData["BlockName"] = blockRef.Name;
-                                entityData["Rotation"] = blockRef.Rotation;
-                                entityData["ScaleX"] = blockRef.ScaleFactors.X;
-                                entityData["ScaleY"] = blockRef.ScaleFactors.Y;
-                                entityData["ScaleZ"] = blockRef.ScaleFactors.Z;
+                                semanticEntity["asset_type"] = "Equipment";
+                                semanticEntity["position"] = new { X = blockRef.Position.X, Y = blockRef.Position.Y, Z = blockRef.Position.Z };
+                                meta["block_name"] = blockRef.Name;
+                                meta["rotation"] = blockRef.Rotation;
+                                meta["scale_x"] = blockRef.ScaleFactors.X;
+                                meta["scale_y"] = blockRef.ScaleFactors.Y;
+                                meta["scale_z"] = blockRef.ScaleFactors.Z;
 
-                                // Extract attributes
-                                List<Dictionary<string, object>> attributes = new List<Dictionary<string, object>>();
+                                // CRITICAL: Extract block attributes directly into metadata (unified structure)
                                 foreach (ObjectId attId in blockRef.AttributeCollection)
                                 {
                                     try
                                     {
                                         AttributeReference attRef = (AttributeReference)tr.GetObject(attId, OpenMode.ForRead);
-                                        attributes.Add(new Dictionary<string, object>
-                                        {
-                                            { "Tag", attRef.Tag },
-                                            { "Value", attRef.TextString }
-                                        });
+                                        meta[attRef.Tag] = attRef.TextString; // e.g., "TAG": "P-101A"
                                     }
                                     catch { }
                                 }
-                                if (attributes.Count > 0)
-                                    entityData["Attributes"] = attributes;
 
-                                // Add semantic metadata
-                                var blockMetadata = ExtractBlockReferenceMetadata(blockRef, tr);
-                                if (blockMetadata.Count > 0)
-                                    entityData["metadata"] = blockMetadata;
+                                entities.Add(semanticEntity);
                             }
-                            else if (entity is MText mtext)
+
+                            // --- SMART PIPE/GRID SEGMENTS (Only on appropriate layers) ---
+                            else if (entity is Polyline polyline)
                             {
-                                // Extract raw text and decode it to remove AutoCAD formatting strings
-                                string rawText = "";
-                                try { rawText = mtext.Contents ?? ""; }
-                                catch { rawText = mtext.Text ?? ""; }
+                                // Only classify as pipe if explicitly on a piping layer
+                                if (layerName.Contains("PIPE") || layerName.Contains("M_PIPE"))
+                                {
+                                    semanticEntity["asset_type"] = "PipeSegment";
+                                    meta["length_mm"] = polyline.Length;
 
-                                string cleanText = DecodeMTextContent(rawText);
-                                entityData["Content"] = cleanText;
+                                    List<Dictionary<string, double>> points = new List<Dictionary<string, double>>();
+                                    for (int i = 0; i < polyline.NumberOfVertices; i++)
+                                    {
+                                        Point3d pt = polyline.GetPoint3dAt(i);
+                                        points.Add(new Dictionary<string, double> { { "X", pt.X }, { "Y", pt.Y }, { "Z", pt.Z } });
+                                    }
+                                    meta["vertices"] = points;
 
-                                entityData["Position"] = new { X = mtext.Location.X, Y = mtext.Location.Y, Z = mtext.Location.Z };
-                                entityData["Height"] = mtext.Height;
+                                    entities.Add(semanticEntity);
+                                }
+                                else if (layerName.Contains("GRID") || layerName.Contains("C_GRID"))
+                                {
+                                    semanticEntity["asset_type"] = "GridLine";
+                                    meta["length_mm"] = polyline.Length;
 
-                                // Add semantic metadata
-                                var metadata = ExtractMTextMetadata(mtext, tr);
-                                if (metadata.Count > 0)
-                                    entityData["metadata"] = metadata;
+                                    List<Dictionary<string, double>> points = new List<Dictionary<string, double>>();
+                                    for (int i = 0; i < polyline.NumberOfVertices; i++)
+                                    {
+                                        Point3d pt = polyline.GetPoint3dAt(i);
+                                        points.Add(new Dictionary<string, double> { { "X", pt.X }, { "Y", pt.Y }, { "Z", pt.Z } });
+                                    }
+                                    meta["vertices"] = points;
+
+                                    entities.Add(semanticEntity);
+                                }
+                                else
+                                {
+                                    // Not a pipe, not a grid. Drop it.
+                                    filteredOut++;
+                                    continue;
+                                }
                             }
-
-                            entities.Add(entityData);
+                            // Drop standalone lines, arcs, circles that confuse the LLM
+                            else
+                            {
+                                filteredOut++;
+                                continue;
+                            }
                         }
                         catch { }
                     }
                     tr.Commit();
+                    ed.WriteMessage($"\nSilent: Semantic extraction complete. {entities.Count} assets processed, {filteredOut} junk entities filtered.");
                 }
 
                 // ── 3. Write drawing_data.json next to the .dwg ─────────────

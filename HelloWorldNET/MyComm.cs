@@ -78,6 +78,11 @@ namespace HelloWorldNET
                             entityData["Position"] = new { X = text.Position.X, Y = text.Position.Y, Z = text.Position.Z };
                             entityData["Height"] = text.Height;
                             entityData["Rotation"] = text.Rotation;
+
+                            // Add semantic metadata
+                            var metadata = ExtractDBTextMetadata(text, tr);
+                            if (metadata.Count > 0)
+                                entityData["metadata"] = metadata;
                         }
                         else if (entity is BlockReference blockRef)
                         {
@@ -105,12 +110,29 @@ namespace HelloWorldNET
                             }
                             if (attributes.Count > 0)
                                 entityData["Attributes"] = attributes;
+
+                            // Add semantic metadata
+                            var blockMetadata = ExtractBlockReferenceMetadata(blockRef, tr);
+                            if (blockMetadata.Count > 0)
+                                entityData["metadata"] = blockMetadata;
                         }
                         else if (entity is MText mtext)
                         {
-                            entityData["Content"] = mtext.Text;
+                            // Extract raw text and decode it to remove AutoCAD formatting strings
+                            string rawText = "";
+                            try { rawText = mtext.Contents ?? ""; }
+                            catch { rawText = mtext.Text ?? ""; }
+
+                            string cleanText = DecodeMTextContent(rawText);
+                            entityData["Content"] = cleanText;
+
                             entityData["Position"] = new { X = mtext.Location.X, Y = mtext.Location.Y, Z = mtext.Location.Z };
                             entityData["Height"] = mtext.Height;
+
+                            // Add semantic metadata
+                            var metadata = ExtractMTextMetadata(mtext, tr);
+                            if (metadata.Count > 0)
+                                entityData["metadata"] = metadata;
                         }
 
                         entities.Add(entityData);
@@ -266,7 +288,7 @@ namespace HelloWorldNET
             if (value == null)
                 return "null";
             else if (value is string)
-                return $"\"{value}\"";
+                return $"\"{EscapeJsonString((string)value)}\"";
             else if (value is bool)
                 return value.ToString().ToLower();
             else if (value is System.Collections.IEnumerable && !(value is string))
@@ -1132,6 +1154,11 @@ namespace HelloWorldNET
                                     entityData["Position"] = new { X = text.Position.X, Y = text.Position.Y, Z = text.Position.Z };
                                     entityData["Height"] = text.Height;
                                     entityData["Rotation"] = text.Rotation;
+
+                                    // Add semantic metadata
+                                    var metadata = ExtractDBTextMetadata(text, tr);
+                                    if (metadata.Count > 0)
+                                        entityData["metadata"] = metadata;
                                 }
                                 else if (entity is BlockReference blockRef)
                                 {
@@ -1159,12 +1186,29 @@ namespace HelloWorldNET
                                     }
                                     if (attributes.Count > 0)
                                         entityData["Attributes"] = attributes;
+
+                                    // Add semantic metadata
+                                    var blockMetadata = ExtractBlockReferenceMetadata(blockRef, tr);
+                                    if (blockMetadata.Count > 0)
+                                        entityData["metadata"] = blockMetadata;
                                 }
                                 else if (entity is MText mtext)
                                 {
-                                    entityData["Content"] = mtext.Text;
+                                    // Extract raw text and decode it to remove AutoCAD formatting strings
+                                    string rawText = "";
+                                    try { rawText = mtext.Contents ?? ""; }
+                                    catch { rawText = mtext.Text ?? ""; }
+
+                                    string cleanText = DecodeMTextContent(rawText);
+                                    entityData["Content"] = cleanText;
+
                                     entityData["Position"] = new { X = mtext.Location.X, Y = mtext.Location.Y, Z = mtext.Location.Z };
                                     entityData["Height"] = mtext.Height;
+
+                                    // Add semantic metadata
+                                    var metadata = ExtractMTextMetadata(mtext, tr);
+                                    if (metadata.Count > 0)
+                                        entityData["metadata"] = metadata;
                                 }
 
                                 entities.Add(entityData);
@@ -1392,6 +1436,11 @@ namespace HelloWorldNET
                                 entityData["Position"] = new { X = text.Position.X, Y = text.Position.Y, Z = text.Position.Z };
                                 entityData["Height"] = text.Height;
                                 entityData["Rotation"] = text.Rotation;
+
+                                // Add semantic metadata
+                                var metadata = ExtractDBTextMetadata(text, tr);
+                                if (metadata.Count > 0)
+                                    entityData["metadata"] = metadata;
                             }
                             else if (entity is BlockReference blockRef)
                             {
@@ -1419,12 +1468,29 @@ namespace HelloWorldNET
                                 }
                                 if (attributes.Count > 0)
                                     entityData["Attributes"] = attributes;
+
+                                // Add semantic metadata
+                                var blockMetadata = ExtractBlockReferenceMetadata(blockRef, tr);
+                                if (blockMetadata.Count > 0)
+                                    entityData["metadata"] = blockMetadata;
                             }
                             else if (entity is MText mtext)
                             {
-                                entityData["Content"] = mtext.Text;
+                                // Extract raw text and decode it to remove AutoCAD formatting strings
+                                string rawText = "";
+                                try { rawText = mtext.Contents ?? ""; }
+                                catch { rawText = mtext.Text ?? ""; }
+
+                                string cleanText = DecodeMTextContent(rawText);
+                                entityData["Content"] = cleanText;
+
                                 entityData["Position"] = new { X = mtext.Location.X, Y = mtext.Location.Y, Z = mtext.Location.Z };
                                 entityData["Height"] = mtext.Height;
+
+                                // Add semantic metadata
+                                var metadata = ExtractMTextMetadata(mtext, tr);
+                                if (metadata.Count > 0)
+                                    entityData["metadata"] = metadata;
                             }
 
                             entities.Add(entityData);
@@ -1608,6 +1674,281 @@ namespace HelloWorldNET
 
             // No error found
             return null;
+        }
+
+        /// <summary>
+        /// Extracts semantic metadata for DBText entities.
+        /// </summary>
+        private Dictionary<string, object> ExtractDBTextMetadata(DBText dbText, Transaction tr)
+        {
+            Dictionary<string, object> metadata = new Dictionary<string, object>();
+
+            try
+            {
+                try
+                {
+                    // Extract actual text content
+                    string content = dbText.TextString ?? "";
+                    metadata["content"] = content;
+
+                    // Extract text height
+                    metadata["text_height"] = dbText.Height;
+
+                    // Extract rotation
+                    metadata["rotation"] = dbText.Rotation;
+                }
+                catch (System.Exception innerEx)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Error extracting DBText properties: {innerEx.Message}");
+                    // Return empty metadata rather than throwing
+                }
+            }
+            catch (System.Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Error in ExtractDBTextMetadata: {ex.Message}");
+            }
+
+            return metadata;
+        }
+
+        /// <summary>
+        /// Extracts semantic metadata for MText entities, with unicode character decoding.
+        /// </summary>
+        private Dictionary<string, object> ExtractMTextMetadata(MText mtext, Transaction tr)
+        {
+            Dictionary<string, object> metadata = new Dictionary<string, object>();
+
+            try
+            {
+                try
+                {
+                    // Extract and parse text content, handling MText formatting and unicode
+                    // Try Contents first, fall back to Text if not available
+                    string mtextContent = "";
+                    try
+                    {
+                        mtextContent = mtext.Contents ?? "";
+                    }
+                    catch
+                    {
+                        // Fall back to Text property if Contents is not available
+                        mtextContent = mtext.Text ?? "";
+                    }
+
+                    string content = DecodeMTextContent(mtextContent);
+                    metadata["content"] = content;
+
+                    // Extract text height
+                    metadata["text_height"] = mtext.Height;
+
+                    // Extract rotation
+                    metadata["rotation"] = mtext.Rotation;
+                }
+                catch (System.Exception innerEx)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Error extracting MText properties: {innerEx.Message}");
+                    // Return empty metadata rather than throwing
+                }
+            }
+            catch (System.Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Error in ExtractMTextMetadata: {ex.Message}");
+            }
+
+            return metadata;
+        }
+
+        /// <summary>
+        /// Decodes MText content, handling formatting codes and unicode escapes.
+        /// Converts {\U+XXXX} sequences to actual characters.
+        /// </summary>
+        private string DecodeMTextContent(string mtextContent)
+        {
+            if (string.IsNullOrEmpty(mtextContent))
+                return "";
+
+            StringBuilder decoded = new StringBuilder();
+            int i = 0;
+
+            while (i < mtextContent.Length)
+            {
+                // Check for unicode escape sequence {\U+XXXX}
+                if (i < mtextContent.Length - 7 && mtextContent[i] == '{' && mtextContent[i + 1] == '\\')
+                {
+                    int closeIdx = mtextContent.IndexOf('}', i);
+                    if (closeIdx > i && mtextContent[i + 2] == 'U' && mtextContent[i + 3] == '+')
+                    {
+                        string hexPart = mtextContent.Substring(i + 4, closeIdx - i - 4);
+                        try
+                        {
+                            // Convert unicode hex to character
+                            int codePoint = int.Parse(hexPart, System.Globalization.NumberStyles.HexNumber);
+                            if (codePoint >= 0 && codePoint <= 0x10FFFF)
+                            {
+                                decoded.Append(char.ConvertFromUtf32(codePoint));
+                                i = closeIdx + 1;
+                                continue;
+                            }
+                        }
+                        catch { }
+                    }
+                }
+
+                // Check for other MText formatting codes like \S, \P, etc. and skip them
+                if (mtextContent[i] == '\\' && i + 1 < mtextContent.Length)
+                {
+                    char nextChar = mtextContent[i + 1];
+                    // Skip formatting codes but preserve content
+                    if (nextChar == 'S' || nextChar == 'P' || nextChar == 'L' || nextChar == 'l' || 
+                        nextChar == 'O' || nextChar == 'o' || nextChar == 'K' || nextChar == 'k' ||
+                        nextChar == 'T' || nextChar == 'Q' || nextChar == 'W' || nextChar == 'A' ||
+                        nextChar == 'H' || nextChar == 'C' || nextChar == 'F' || nextChar == 'n' ||
+                        nextChar == '~' || nextChar == '^')
+                    {
+                        i += 2;
+                        // Skip until we find the closing character or space
+                        if (i < mtextContent.Length && mtextContent[i] == '[')
+                        {
+                            int closeBracket = mtextContent.IndexOf(']', i);
+                            if (closeBracket > i)
+                                i = closeBracket + 1;
+                        }
+                        continue;
+                    }
+                }
+
+                // Check for curly brace formatting groups and skip the braces but keep content
+                if (mtextContent[i] == '{')
+                {
+                    i++; // Skip opening brace
+                    while (i < mtextContent.Length && mtextContent[i] != '}')
+                    {
+                        decoded.Append(mtextContent[i]);
+                        i++;
+                    }
+                    if (i < mtextContent.Length && mtextContent[i] == '}')
+                        i++; // Skip closing brace
+                    continue;
+                }
+
+                // Regular character
+                decoded.Append(mtextContent[i]);
+                i++;
+            }
+
+            return decoded.ToString();
+        }
+
+        /// <summary>
+        /// Extracts semantic metadata for BlockReference entities, including block name and attributes.
+        /// Handles dynamic blocks properly.
+        /// </summary>
+        private Dictionary<string, object> ExtractBlockReferenceMetadata(BlockReference blockRef, Transaction tr)
+        {
+            Dictionary<string, object> metadata = new Dictionary<string, object>();
+
+            try
+            {
+                try
+                {
+                    // Extract block name
+                    metadata["block_name"] = blockRef.Name ?? "";
+
+                    // Check if this is a dynamic block
+                    bool isDynamicBlock = blockRef.IsDynamicBlock;
+                    metadata["IsDynamicBlock"] = isDynamicBlock;
+                }
+                catch (System.Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Error extracting block name/dynamic status: {ex.Message}");
+                }
+
+                // Extract attributes
+                try
+                {
+                    foreach (ObjectId attRefId in blockRef.AttributeCollection)
+                    {
+                        try
+                        {
+                            AttributeReference attRef = (AttributeReference)tr.GetObject(attRefId, OpenMode.ForRead);
+                            if (attRef != null)
+                            {
+                                string tag = attRef.Tag ?? "";
+                                string value = attRef.TextString ?? "";
+
+                                // Only add non-empty values, or add empty string if tag is important
+                                if (!string.IsNullOrEmpty(tag))
+                                {
+                                    metadata[tag] = value;
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+                }
+                catch (System.Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Error extracting block attributes: {ex.Message}");
+                }
+            }
+            catch (System.Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Error in ExtractBlockReferenceMetadata: {ex.Message}");
+            }
+
+            return metadata;
+        }
+
+        /// <summary>
+        /// Generates a unique entity ID based on entity type and index.
+        /// </summary>
+        private string GenerateEntityId(string entityType, int index)
+        {
+            // Generate IDs like TEXT_1, EQUIP_2, etc.
+            string prefix = "";
+            switch (entityType)
+            {
+                case "DBText":
+                case "MText":
+                    prefix = "TEXT";
+                    break;
+                case "BlockReference":
+                    prefix = "EQUIP";
+                    break;
+                case "Line":
+                    prefix = "LINE";
+                    break;
+                case "Circle":
+                    prefix = "CIRC";
+                    break;
+                case "Arc":
+                    prefix = "ARC";
+                    break;
+                case "Polyline":
+                    prefix = "POLY";
+                    break;
+                default:
+                    prefix = entityType.Substring(0, Math.Min(4, entityType.Length)).ToUpper();
+                    break;
+            }
+            return $"{prefix}_{index}";
+        }
+
+        /// <summary>
+        /// Determines the semantic asset type based on AutoCAD entity type.
+        /// </summary>
+        private string GetSemanticAssetType(string entityType)
+        {
+            switch (entityType)
+            {
+                case "DBText":
+                case "MText":
+                    return "TextCallout";
+                case "BlockReference":
+                    return "Equipment";
+                default:
+                    return "Generic";
+            }
         }
     }
 }

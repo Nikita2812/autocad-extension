@@ -118,12 +118,11 @@ namespace HelloWorldNET
                         }
                         else if (entity is MText mtext)
                         {
-                            // Extract raw text and decode it to remove AutoCAD formatting strings
-                            string rawText = "";
-                            try { rawText = mtext.Contents ?? ""; }
-                            catch { rawText = mtext.Text ?? ""; }
+                            // Extract clean text (mtext.Text gives unformatted content without AutoCAD codes)
+                            string cleanText = "";
+                            try { cleanText = mtext.Text ?? ""; }
+                            catch { cleanText = ""; }
 
-                            string cleanText = DecodeMTextContent(rawText);
                             entityData["Content"] = cleanText;
 
                             entityData["Position"] = new { X = mtext.Location.X, Y = mtext.Location.Y, Z = mtext.Location.Z };
@@ -1181,11 +1180,10 @@ namespace HelloWorldNET
                                     semanticEntity["asset_type"] = "TextCallout";
                                     semanticEntity["position"] = new { X = mtext.Location.X, Y = mtext.Location.Y, Z = mtext.Location.Z };
 
-                                    // Extract and decode MText content
-                                    string rawText = "";
-                                    try { rawText = mtext.Contents ?? ""; }
-                                    catch { rawText = mtext.Text ?? ""; }
-                                    string cleanText = DecodeMTextContent(rawText);
+                                    // Extract clean text (mtext.Text gives unformatted content without AutoCAD codes)
+                                    string cleanText = "";
+                                    try { cleanText = mtext.Text ?? ""; }
+                                    catch { cleanText = ""; }
 
                                     meta["content"] = cleanText;
                                     meta["height"] = mtext.Height;
@@ -1499,11 +1497,10 @@ namespace HelloWorldNET
                                 semanticEntity["asset_type"] = "TextCallout";
                                 semanticEntity["position"] = new { X = mtext.Location.X, Y = mtext.Location.Y, Z = mtext.Location.Z };
 
-                                // Extract and decode MText content
-                                string rawText = "";
-                                try { rawText = mtext.Contents ?? ""; }
-                                catch { rawText = mtext.Text ?? ""; }
-                                string cleanText = DecodeMTextContent(rawText);
+                                // Extract clean text (mtext.Text gives unformatted content without AutoCAD codes)
+                                string cleanText = "";
+                                try { cleanText = mtext.Text ?? ""; }
+                                catch { cleanText = ""; }
 
                                 meta["content"] = cleanText;
                                 meta["height"] = mtext.Height;
@@ -1813,20 +1810,18 @@ namespace HelloWorldNET
             {
                 try
                 {
-                    // Extract and parse text content, handling MText formatting and unicode
-                    // Try Contents first, fall back to Text if not available
-                    string mtextContent = "";
+                    // Extract clean text (mtext.Text gives unformatted content without AutoCAD codes)
+                    string content = "";
                     try
                     {
-                        mtextContent = mtext.Contents ?? "";
+                        content = mtext.Text ?? "";
                     }
                     catch
                     {
-                        // Fall back to Text property if Contents is not available
-                        mtextContent = mtext.Text ?? "";
+                        // Fallback in case Text property is not available
+                        content = "";
                     }
 
-                    string content = DecodeMTextContent(mtextContent);
                     metadata["content"] = content;
 
                     // Extract text height

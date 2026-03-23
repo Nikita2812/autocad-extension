@@ -291,6 +291,8 @@ namespace HelloWorldNET
                 return $"\"{EscapeJsonString((string)value)}\"";
             else if (value is bool)
                 return value.ToString().ToLower();
+            else if (value is Dictionary<string, object> dict)
+                return SerializeDictionary(dict);
             else if (value is System.Collections.IEnumerable && !(value is string))
                 return SerializeList(value as System.Collections.IEnumerable);
             else if (value.GetType().IsClass && value.GetType().Name != "String")
@@ -311,6 +313,24 @@ namespace HelloWorldNET
                 var val = prop.GetValue(obj);
                 sb.Append($"\"{prop.Name}\": {GetJsonValue(val)}");
                 if (i < props.Length - 1) sb.Append(", ");
+            }
+
+            sb.Append("}");
+            return sb.ToString();
+        }
+
+        private string SerializeDictionary(Dictionary<string, object> dict)
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.Append("{");
+
+            var keys = dict.Keys.ToList();
+            for (int i = 0; i < keys.Count; i++)
+            {
+                string key = keys[i];
+                object val = dict[key];
+                sb.Append($"\"{EscapeJsonString(key)}\": {GetJsonValue(val)}");
+                if (i < keys.Count - 1) sb.Append(", ");
             }
 
             sb.Append("}");

@@ -66,6 +66,10 @@
     <None Include="ENHANCEMENT_SUMMARY.md" />
     <None Include="EXTRACT_JSON_ONLY_DOCS.md" />
     <None Include="IMPLEMENTATION_DETAILS.md" />
+    <None Include="JSON_FIX_EXAMPLES.md" />
+    <None Include="JSON_SERIALIZATION_FIX.md" />
+    <None Include="JSON_SERIALIZATION_FIX_SUMMARY.md" />
+    <None Include="packages.config" />
     <None Include="QUICK_REFERENCE.md" />
     <None Include="REFACTORING_NOTES.md" />
     <None Include="REGRESSION_FIX.md" />

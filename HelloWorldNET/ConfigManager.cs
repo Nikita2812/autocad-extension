@@ -293,5 +293,183 @@ namespace HelloWorldNET
 
             return result;
         }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // FINGERPRINT RULE LOADING
+        // Loads block classification rules from fingerprints.json
+        // ─────────────────────────────────────────────────────────────────────
+
+        private List<FingerprintRule> _cachedFingerprintRules;
+        private string _fingerprintsConfigPath;
+
+        /// <summary>
+        /// Loads fingerprint rules from the fingerprints.json configuration file.
+        /// Rules are cached in memory after first load.
+        /// All matching rules are returned separated by " / " (no priority ordering).
+        /// </summary>
+        public List<FingerprintRule> LoadFingerprintRules(string configPath = null)
+        {
+            // Return cached rules if already loaded
+            if (_cachedFingerprintRules != null && !string.IsNullOrEmpty(_fingerprintsConfigPath) && File.Exists(_fingerprintsConfigPath))
+            {
+                return _cachedFingerprintRules;
+            }
+
+            _cachedFingerprintRules = new List<FingerprintRule>();
+
+            try
+            {
+                // Determine fingerprints.json path
+                string fingerprintsPath = configPath ?? GetDefaultFingerprintsPath();
+
+                if (!File.Exists(fingerprintsPath))
+                {
+                    System.Diagnostics.Debug.WriteLine($"Fingerprints config not found at: {fingerprintsPath}");
+                    return _cachedFingerprintRules; // Return empty list
+                }
+
+                _fingerprintsConfigPath = fingerprintsPath;
+                string json = File.ReadAllText(fingerprintsPath).Trim();
+                Dictionary<string, object> config = ParseJsonToDictionary(json);
+
+                // Extract the fingerprint_rules array
+                if (config.ContainsKey("fingerprint_rules") && config["fingerprint_rules"] is List<object> rulesArray)
+                {
+                    foreach (var ruleObj in rulesArray)
+                    {
+                        if (ruleObj is Dictionary<string, object> ruleDict)
+                        {
+                            FingerprintRule rule = ParseFingerprintRule(ruleDict);
+                            if (rule != null)
+                            {
+                                _cachedFingerprintRules.Add(rule);
+                            }
+                        }
+                    }
+                }
+
+                // Return rules (no sorting - all matches are equally valid)
+                System.Diagnostics.Debug.WriteLine($"Loaded {_cachedFingerprintRules.Count} fingerprint rules from {fingerprintsPath}");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Error loading fingerprint rules: {ex.Message}");
+            }
+
+            return _cachedFingerprintRules;
+        }
+
+        /// <summary>
+        /// Gets the cached fingerprint rules. Loads them first if not already cached.
+        /// </summary>
+        public List<FingerprintRule> GetFingerprintRules()
+        {
+            if (_cachedFingerprintRules == null)
+            {
+                LoadFingerprintRules();
+            }
+            return _cachedFingerprintRules ?? new List<FingerprintRule>();
+        }
+
+        private static string GetDefaultFingerprintsPath()
+        {
+            // Try to find fingerprints.json in the same directory as the assembly
+            string assemblyLocation = System.Reflection.Assembly.GetExecutingAssembly().Location;
+            string assemblyDirectory = Path.GetDirectoryName(assemblyLocation);
+            string configPath = Path.Combine(assemblyDirectory, "fingerprints.json");
+
+            if (!File.Exists(configPath))
+            {
+                // Fallback to temp directory
+                configPath = Path.Combine(Path.GetTempPath(), "ai_review", "fingerprints.json");
+            }
+
+            return configPath;
+        }
+
+        private FingerprintRule ParseFingerprintRule(Dictionary<string, object> ruleDict)
+        {
+            try
+            {
+                var rule = new FingerprintRule
+                {
+                    AssignedName = GetStringFromDict(ruleDict, "assigned_name", "UNKNOWN"),
+                    Description = GetStringFromDict(ruleDict, "description", "")
+                };
+
+                // Parse geometry_match constraints
+                if (ruleDict.ContainsKey("geometry_match") && ruleDict["geometry_match"] is Dictionary<string, object> matchDict)
+                {
+                    rule.GeometryMatch = ParseGeometryConstraints(matchDict);
+                }
+
+                return rule;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Error parsing fingerprint rule: {ex.Message}");
+                return null;
+            }
+        }
+
+        private GeometryConstraints ParseGeometryConstraints(Dictionary<string, object> constraintsDict)
+        {
+            var constraints = new GeometryConstraints
+            {
+                MinCircles = GetNullableIntFromDict(constraintsDict, "min_circles"),
+                MaxCircles = GetNullableIntFromDict(constraintsDict, "max_circles"),
+
+                MinLines = GetNullableIntFromDict(constraintsDict, "min_lines"),
+                MaxLines = GetNullableIntFromDict(constraintsDict, "max_lines"),
+
+                MinPolylines = GetNullableIntFromDict(constraintsDict, "min_polylines"),
+                MaxPolylines = GetNullableIntFromDict(constraintsDict, "max_polylines"),
+
+                MinArcs = GetNullableIntFromDict(constraintsDict, "min_arcs"),
+                MaxArcs = GetNullableIntFromDict(constraintsDict, "max_arcs"),
+
+                MinHatches = GetNullableIntFromDict(constraintsDict, "min_hatches"),
+                MaxHatches = GetNullableIntFromDict(constraintsDict, "max_hatches"),
+
+                MinTexts = GetNullableIntFromDict(constraintsDict, "min_texts"),
+                MaxTexts = GetNullableIntFromDict(constraintsDict, "max_texts")
+            };
+
+            return constraints;
+        }
+
+        private string GetStringFromDict(Dictionary<string, object> dict, string key, string defaultValue)
+        {
+            if (dict.ContainsKey(key) && dict[key] != null)
+            {
+                string val = dict[key].ToString();
+                return string.IsNullOrWhiteSpace(val) ? defaultValue : val;
+            }
+            return defaultValue;
+        }
+
+        private int GetIntFromDict(Dictionary<string, object> dict, string key, int defaultValue)
+        {
+            if (dict.ContainsKey(key) && dict[key] != null)
+            {
+                if (int.TryParse(dict[key].ToString(), out int val))
+                {
+                    return val;
+                }
+            }
+            return defaultValue;
+        }
+
+        private int? GetNullableIntFromDict(Dictionary<string, object> dict, string key)
+        {
+            if (dict.ContainsKey(key) && dict[key] != null)
+            {
+                if (int.TryParse(dict[key].ToString(), out int val))
+                {
+                    return val;
+                }
+            }
+            return null;
+        }
     }
 }

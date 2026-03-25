@@ -1,0 +1,105 @@
+{
+  "fingerprint_rules": [
+    {
+      "assigned_name": "INSTRUMENT_BUBBLE",
+      "description": "Instrument circle with tag/label text (P-101, T-201, etc.)",
+      "geometry_match": {
+        "min_circles": 1,
+        "max_circles": 1,
+        "min_texts": 1,
+        "max_texts": 2
+      }
+    },
+    {
+      "assigned_name": "VALVE_GATE",
+      "description": "Gate valve symbol (diamond with connecting lines)",
+      "geometry_match": {
+        "min_polylines": 1,
+        "max_polylines": 3,
+        "min_lines": 2,
+        "max_lines": 4
+      }
+    },
+    {
+      "assigned_name": "VALVE_CHECK",
+      "description": "Check valve (circle with internal line)",
+      "geometry_match": {
+        "min_circles": 1,
+        "max_circles": 1,
+        "min_lines": 1,
+        "max_lines": 2
+      }
+    },
+    {
+      "assigned_name": "PUMP_CENTRIFUGAL",
+      "description": "Centrifugal pump (circle with arrow/line indicating flow)",
+      "geometry_match": {
+        "min_circles": 1,
+        "max_circles": 1,
+        "min_lines": 2,
+        "max_lines": 4
+      }
+    },
+    {
+      "assigned_name": "TEE_FITTING",
+      "description": "Tee or junction (multiple polylines meeting)",
+      "geometry_match": {
+        "min_polylines": 2,
+        "max_polylines": 4,
+        "max_circles": 0
+      }
+    },
+    {
+      "assigned_name": "STRAINER_Y",
+      "description": "Y-strainer (hatched shape with legs)",
+      "geometry_match": {
+        "min_hatches": 1,
+        "min_lines": 2,
+        "min_polylines": 1
+      }
+    },
+    {
+      "assigned_name": "REDUCER_ECCENTRIC",
+      "description": "Eccentric reducer (two concentric circles or complex profile)",
+      "geometry_match": {
+        "min_circles": 2,
+        "max_circles": 2
+      }
+    },
+    {
+      "assigned_name": "ELBOW_45",
+      "description": "45-degree elbow",
+      "geometry_match": {
+        "min_arcs": 1,
+        "max_arcs": 1,
+        "min_lines": 2,
+        "max_lines": 3
+      }
+    },
+    {
+      "assigned_name": "ELBOW_90",
+      "description": "90-degree elbow",
+      "geometry_match": {
+        "min_arcs": 1,
+        "max_arcs": 1,
+        "min_lines": 2,
+        "max_lines": 3
+      }
+    },
+    {
+      "assigned_name": "BLIND_FLANGE",
+      "description": "Blank/blind flange (solid circle)",
+      "geometry_match": {
+        "min_circles": 1,
+        "max_circles": 1,
+        "max_lines": 0,
+        "max_texts": 0,
+        "max_polylines": 0
+      }
+    }
+  ],
+
+  "fallback_strategy": "UNKNOWN_COMPONENT",
+  "enable_logging": true,
+  "log_unmatched_blocks": true
+}

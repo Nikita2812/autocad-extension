@@ -2036,5 +2036,99 @@ namespace HelloWorldNET
                     return "Generic";
             }
         }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // DYNAMIC FINGERPRINTING ENGINE
+        // Matches anonymous blocks to asset types using JSON-configured rules.
+        // Zero-downtime customization: add new rules to fingerprints.json,
+        // no C# recompilation required.
+        // ─────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Fingerprints an anonymous block by tallying its internal geometry
+        /// and matching against configured rules from fingerprints.json.
+        /// Returns ALL matching rule names separated by " / ", or fallback if no matches.
+        /// </summary>
+        private string FingerprintAnonymousBlock(ObjectId blockRecordId, Transaction tr, 
+            Editor ed = null, string drawingName = null)
+        {
+            try
+            {
+                BlockTableRecord blockDef = (BlockTableRecord)tr.GetObject(blockRecordId, OpenMode.ForRead);
+
+                // 1. Tally all geometry inside the anonymous block
+                GeometryTally tally = new GeometryTally();
+
+                foreach (ObjectId id in blockDef)
+                {
+                    try
+                    {
+                        Entity ent = (Entity)tr.GetObject(id, OpenMode.ForRead);
+                        if (ent is Circle)
+                            tally.Circles++;
+                        else if (ent is Line)
+                            tally.Lines++;
+                        else if (ent is Polyline)
+                            tally.Polylines++;
+                        else if (ent is Arc)
+                            tally.Arcs++;
+                        else if (ent is Hatch)
+                            tally.Hatches++;
+                        else if (ent is DBText || ent is MText)
+                            tally.Texts++;
+                    }
+                    catch { }
+                }
+
+                // 2. Load fingerprint rules from configuration
+                ConfigManager configMgr = ConfigManager.GetInstance();
+                List<FingerprintRule> rules = configMgr.GetFingerprintRules();
+
+                if (rules == null || rules.Count == 0)
+                {
+                    if (ed != null)
+                        ed.WriteMessage($"\nWarning: No fingerprint rules loaded.");
+                    return "UNKNOWN_COMPONENT";
+                }
+
+                // 3. Collect ALL matching rules
+                List<string> matches = new List<string>();
+
+                foreach (FingerprintRule rule in rules)
+                {
+                    if (rule.IsMatch(tally))
+                    {
+                        matches.Add(rule.AssignedName);
+                    }
+                }
+
+                // 4. Return all matches or fallback
+                if (matches.Count > 0)
+                {
+                    string result = string.Join(" / ", matches);
+                    if (ed != null)
+                    {
+                        ed.WriteMessage($"\n  → Matches: {result} ({tally})");
+                    }
+                    return result;
+                }
+                else
+                {
+                    // No rules matched
+                    if (ed != null)
+                    {
+                        ed.WriteMessage($"\n  → No matches for geometry: {tally}");
+                        ed.WriteMessage($"\n  → Using fallback: UNKNOWN_COMPONENT");
+                    }
+                    return "UNKNOWN_COMPONENT";
+                }
+            }
+            catch (System.Exception ex)
+            {
+                if (ed != null)
+                    ed.WriteMessage($"\nError fingerprinting block: {ex.Message}");
+                return "UNKNOWN_COMPONENT";
+            }
+        }
     }
 }

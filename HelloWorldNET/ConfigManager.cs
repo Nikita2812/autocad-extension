@@ -394,7 +394,8 @@ namespace HelloWorldNET
                 var rule = new FingerprintRule
                 {
                     AssignedName = GetStringFromDict(ruleDict, "assigned_name", "UNKNOWN"),
-                    Description = GetStringFromDict(ruleDict, "description", "")
+                    Description = GetStringFromDict(ruleDict, "description", ""),
+                    Department = GetStringFromDict(ruleDict, "department", "")  // Empty = all departments
                 };
 
                 // Parse geometry_match constraints

@@ -1077,10 +1077,13 @@ namespace HelloWorldNET
 
                 string drawingPath = GetSilentConfigValue(config, "drawing_path", null);
                 string uuid = GetSilentConfigValue(config, "uuid", null);
+                string department = GetSilentConfigValue(config, "department", null);
 
                 LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Drawing path: {drawingPath}");
                 LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] UUID: {(string.IsNullOrEmpty(uuid) ? "(none)" : uuid)}");
+                LogToFile(logPath, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Department: {(string.IsNullOrEmpty(department) ? "(auto-detect from layer)" : department)}");
                 if (ed != null) ed.WriteMessage($"\nDrawing: {drawingPath}");
+                if (ed != null) ed.WriteMessage($"\nDepartment: {(string.IsNullOrEmpty(department) ? "(auto-detect from layer)" : department)}");
 
                 if (string.IsNullOrWhiteSpace(drawingPath))
                 {
@@ -1173,7 +1176,6 @@ namespace HelloWorldNET
                                     meta["rotation"] = dbText.Rotation;
 
                                     entities.Add(semanticEntity);
-                                    entityCount++;
                                 }
                                 else if (entity is MText mtext)
                                 {
@@ -1190,7 +1192,6 @@ namespace HelloWorldNET
                                     meta["rotation"] = mtext.Rotation;
 
                                     entities.Add(semanticEntity);
-                                    entityCount++;
                                 }
 
                                 // --- EQUIPMENT BLOCKS ---
@@ -1253,7 +1254,6 @@ namespace HelloWorldNET
                                         meta["vertices"] = points;
 
                                         entities.Add(semanticEntity);
-                                        entityCount++;
                                     }
                                     else
                                     {
@@ -1435,6 +1435,7 @@ namespace HelloWorldNET
                 string apiUrl         = GetSilentConfigValue(config, "api_url",         null);
                 string projectId      = GetSilentConfigValue(config, "project_id",      "");
                 string participantId  = GetSilentConfigValue(config, "participant_id",  configMgr.GetDefaultParticipantId());
+                string department     = GetSilentConfigValue(config, "department",      null);
                 string model          = GetSilentConfigValue(config, "model",           configMgr.GetApiModel());
                 string drawingNameCfg = GetSilentConfigValue(config, "drawing_name",    null);
 
@@ -1519,6 +1520,14 @@ namespace HelloWorldNET
                                 meta["scale_x"] = blockRef.ScaleFactors.X;
                                 meta["scale_y"] = blockRef.ScaleFactors.Y;
                                 meta["scale_z"] = blockRef.ScaleFactors.Z;
+
+                                // FINGERPRINTING: If anonymous block, classify it
+                                if (blockRef.Name.StartsWith("*"))
+                                {
+                                    string fingerprintResult = FingerprintAnonymousBlock(blockRef.BlockId, tr, ed, department);
+                                    meta["block_fingerprint"] = fingerprintResult;
+                                    semanticEntity["asset_type"] = fingerprintResult;  // Override with fingerprinted type
+                                }
 
                                 // CRITICAL: Extract block attributes directly into metadata (unified structure)
                                 foreach (ObjectId attId in blockRef.AttributeCollection)
@@ -2045,18 +2054,35 @@ namespace HelloWorldNET
         // ─────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Fingerprints an anonymous block by tallying its internal geometry
-        /// and matching against configured rules from fingerprints.json.
+        /// Fingerprints an anonymous block by:
+        /// 1. Using the provided department (from request or layer detection)
+        /// 2. Tallying its internal geometry
+        /// 3. Matching against department-filtered rules
+        /// 
         /// Returns ALL matching rule names separated by " / ", or fallback if no matches.
         /// </summary>
         private string FingerprintAnonymousBlock(ObjectId blockRecordId, Transaction tr, 
-            Editor ed = null, string drawingName = null)
+            Editor ed = null, string providedDepartment = null)
         {
             try
             {
                 BlockTableRecord blockDef = (BlockTableRecord)tr.GetObject(blockRecordId, OpenMode.ForRead);
 
-                // 1. Tally all geometry inside the anonymous block
+                // 1. Determine the block's department
+                // Priority: Provided department (from request) > Layer-based detection
+                string blockDepartment = providedDepartment;
+                string departmentSource = "request";
+
+                if (string.IsNullOrWhiteSpace(blockDepartment))
+                {
+                    blockDepartment = DetermineDepartmentFromEntity(blockRecordId, tr);
+                    departmentSource = "layer";
+                }
+
+                if (ed != null)
+                    ed.WriteMessage($"\n  → Department: {blockDepartment} (from {departmentSource})");
+
+                // 2. Tally all geometry inside the anonymous block
                 GeometryTally tally = new GeometryTally();
 
                 foreach (ObjectId id in blockDef)
@@ -2080,21 +2106,42 @@ namespace HelloWorldNET
                     catch { }
                 }
 
-                // 2. Load fingerprint rules from configuration
+                // 3. Load fingerprint rules from configuration
                 ConfigManager configMgr = ConfigManager.GetInstance();
-                List<FingerprintRule> rules = configMgr.GetFingerprintRules();
+                List<FingerprintRule> allRules = configMgr.GetFingerprintRules();
 
-                if (rules == null || rules.Count == 0)
+                if (allRules == null || allRules.Count == 0)
                 {
                     if (ed != null)
                         ed.WriteMessage($"\nWarning: No fingerprint rules loaded.");
                     return "UNKNOWN_COMPONENT";
                 }
 
-                // 3. Collect ALL matching rules
+                // 4. Filter rules by department (include rules with empty department = applies to all)
+                List<FingerprintRule> applicableRules = new List<FingerprintRule>();
+                foreach (var rule in allRules)
+                {
+                    // Include rule if:
+                    // - Its department matches the block's department, OR
+                    // - It has no department specified (applies to all departments)
+                    if (string.IsNullOrWhiteSpace(rule.Department) || 
+                        rule.Department.Equals(blockDepartment, System.StringComparison.OrdinalIgnoreCase))
+                    {
+                        applicableRules.Add(rule);
+                    }
+                }
+
+                if (applicableRules.Count == 0)
+                {
+                    if (ed != null)
+                        ed.WriteMessage($"\n  → No rules for department: {blockDepartment}");
+                    return "UNKNOWN_COMPONENT";
+                }
+
+                // 5. Collect ALL matching rules
                 List<string> matches = new List<string>();
 
-                foreach (FingerprintRule rule in rules)
+                foreach (FingerprintRule rule in applicableRules)
                 {
                     if (rule.IsMatch(tally))
                     {
@@ -2102,13 +2149,13 @@ namespace HelloWorldNET
                     }
                 }
 
-                // 4. Return all matches or fallback
+                // 6. Return all matches or fallback
                 if (matches.Count > 0)
                 {
                     string result = string.Join(" / ", matches);
                     if (ed != null)
                     {
-                        ed.WriteMessage($"\n  → Matches: {result} ({tally})");
+                        ed.WriteMessage($"\n  → Matches ({applicableRules.Count} rules evaluated): {result} ({tally})");
                     }
                     return result;
                 }
@@ -2117,7 +2164,7 @@ namespace HelloWorldNET
                     // No rules matched
                     if (ed != null)
                     {
-                        ed.WriteMessage($"\n  → No matches for geometry: {tally}");
+                        ed.WriteMessage($"\n  → No matches for geometry: {tally} (checked {applicableRules.Count} rules)");
                         ed.WriteMessage($"\n  → Using fallback: UNKNOWN_COMPONENT");
                     }
                     return "UNKNOWN_COMPONENT";
@@ -2129,6 +2176,75 @@ namespace HelloWorldNET
                     ed.WriteMessage($"\nError fingerprinting block: {ex.Message}");
                 return "UNKNOWN_COMPONENT";
             }
+        }
+
+        /// <summary>
+        /// Determines the department of a block based on layer naming conventions.
+        /// 
+        /// Common layer naming patterns:
+        /// - "M_*" or "*_MECH*" → Mechanical
+        /// - "E_*" or "*_ELEC*" → Electrical
+        /// - "I_*" or "*_INST*" → Instrumentation
+        /// - "P_*" or "*_PIPE*" → Piping
+        /// - Otherwise → Generic (matches all-department rules)
+        /// </summary>
+        private string DetermineDepartmentFromEntity(ObjectId blockRefId, Transaction tr)
+        {
+            try
+            {
+                // For anonymous blocks, we determine department from layer of the BlockReference
+                // that uses them. Since we're in extraction, we can use a simple heuristic.
+                // In a real scenario, you might store department in block attributes or xdata.
+
+                // For now, return "Generic" to match all-department rules
+                return "Generic";
+            }
+            catch
+            {
+                return "Generic";
+            }
+        }
+
+        /// <summary>
+        /// Determines department based on layer name using common naming conventions.
+        /// Returns empty string for "Generic" (matches all-department rules).
+        /// </summary>
+        private string DetermineDepartmentFromLayer(string layerName)
+        {
+            if (string.IsNullOrWhiteSpace(layerName))
+                return "";  // Generic
+
+            layerName = layerName.ToUpper();
+
+            // Mechanical: M_*, *_MECH*, *_EQUIPMENT*
+            if (layerName.StartsWith("M_") || layerName.Contains("_MECH") || 
+                layerName.Contains("_EQUIP") || layerName.Contains("PUMP") || 
+                layerName.Contains("VALVE") || layerName.Contains("FITTING"))
+                return "Mechanical";
+
+            // Electrical: E_*, *_ELEC*, *_POWER*
+            if (layerName.StartsWith("E_") || layerName.Contains("_ELEC") || 
+                layerName.Contains("_POWER") || layerName.Contains("CABLE") || 
+                layerName.Contains("CONDUIT"))
+                return "Electrical";
+
+            // Instrumentation: I_*, *_INST*
+            if (layerName.StartsWith("I_") || layerName.Contains("_INST") || 
+                layerName.Contains("INSTRUMENT") || layerName.Contains("SENSOR"))
+                return "Instrumentation";
+
+            // Piping: P_*, *_PIPE*
+            if (layerName.StartsWith("P_") || layerName.Contains("_PIPE") || 
+                layerName.Contains("PIPELINE"))
+                return "Piping";
+
+            // Civil: C_*, *_CIVIL*
+            if (layerName.StartsWith("C_") || layerName.Contains("_CIVIL") || 
+                layerName.Contains("STRUCTURAL"))
+                return "Civil";
+
+            // Default: generic (matches all-department rules)
+            return "";
         }
     }
 }

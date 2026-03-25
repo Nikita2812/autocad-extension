@@ -3,6 +3,7 @@
     {
       "assigned_name": "INSTRUMENT_BUBBLE",
       "description": "Instrument circle with tag/label text (P-101, T-201, etc.)",
+      "department": "Instrumentation",
       "geometry_match": {
         "min_circles": 1,
         "max_circles": 1,
@@ -13,6 +14,7 @@
     {
       "assigned_name": "VALVE_GATE",
       "description": "Gate valve symbol (diamond with connecting lines)",
+      "department": "Piping",
       "geometry_match": {
         "min_polylines": 1,
         "max_polylines": 3,
@@ -23,6 +25,7 @@
     {
       "assigned_name": "VALVE_CHECK",
       "description": "Check valve (circle with internal line)",
+      "department": "Piping",
       "geometry_match": {
         "min_circles": 1,
         "max_circles": 1,
@@ -31,8 +34,20 @@
       }
     },
     {
+      "assigned_name": "DISCHARGE_CHECK_VALVE",
+      "description": "Discharge check valve (at pump outlet or equipment discharge)",
+      "department": "Piping",
+      "geometry_match": {
+        "min_circles": 1,
+        "max_circles": 1,
+        "min_lines": 2,
+        "max_lines": 4
+      }
+    },
+    {
       "assigned_name": "PUMP_CENTRIFUGAL",
       "description": "Centrifugal pump (circle with arrow/line indicating flow)",
+      "department": "Mechanical",
       "geometry_match": {
         "min_circles": 1,
         "max_circles": 1,
@@ -43,6 +58,7 @@
     {
       "assigned_name": "TEE_FITTING",
       "description": "Tee or junction (multiple polylines meeting)",
+      "department": "Piping",
       "geometry_match": {
         "min_polylines": 2,
         "max_polylines": 4,
@@ -52,6 +68,7 @@
     {
       "assigned_name": "STRAINER_Y",
       "description": "Y-strainer (hatched shape with legs)",
+      "department": "Piping",
       "geometry_match": {
         "min_hatches": 1,
         "min_lines": 2,
@@ -59,8 +76,21 @@
       }
     },
     {
+      "assigned_name": "BASKET_STRAINER",
+      "description": "Basket strainer (suction or discharge, cartridge type)",
+      "department": "Piping",
+      "geometry_match": {
+        "min_polylines": 1,
+        "max_polylines": 3,
+        "min_lines": 2,
+        "max_lines": 4,
+        "max_circles": 1
+      }
+    },
+    {
       "assigned_name": "REDUCER_ECCENTRIC",
       "description": "Eccentric reducer (two concentric circles or complex profile)",
+      "department": "Piping",
       "geometry_match": {
         "min_circles": 2,
         "max_circles": 2
@@ -69,6 +99,7 @@
     {
       "assigned_name": "ELBOW_45",
       "description": "45-degree elbow",
+      "department": "Piping",
       "geometry_match": {
         "min_arcs": 1,
         "max_arcs": 1,
@@ -79,6 +110,7 @@
     {
       "assigned_name": "ELBOW_90",
       "description": "90-degree elbow",
+      "department": "Piping",
       "geometry_match": {
         "min_arcs": 1,
         "max_arcs": 1,
@@ -89,6 +121,7 @@
     {
       "assigned_name": "BLIND_FLANGE",
       "description": "Blank/blind flange (solid circle)",
+      "department": "Piping",
       "geometry_match": {
         "min_circles": 1,
         "max_circles": 1,
@@ -96,10 +129,50 @@
         "max_texts": 0,
         "max_polylines": 0
       }
+    },
+    {
+      "assigned_name": "MOTOR_AC",
+      "description": "AC motor (circle with internal marking)",
+      "department": "Electrical",
+      "geometry_match": {
+        "min_circles": 1,
+        "max_circles": 1,
+        "min_lines": 1,
+        "max_lines": 3
+      }
+    },
+    {
+      "assigned_name": "BREAKER_CIRCUIT",
+      "description": "Circuit breaker (rectangular with line)",
+      "department": "Electrical",
+      "geometry_match": {
+        "min_lines": 2,
+        "max_lines": 4,
+        "max_circles": 0,
+        "max_polylines": 1
+      }
+    },
+    {
+      "assigned_name": "TRANSFORMER",
+      "description": "Transformer (two circles or coils)",
+      "department": "Electrical",
+      "geometry_match": {
+        "min_circles": 2,
+        "max_circles": 2
+      }
     }
   ],
 
   "fallback_strategy": "UNKNOWN_COMPONENT",
   "enable_logging": true,
-  "log_unmatched_blocks": true
+  "log_unmatched_blocks": true,
+  "department_mapping": {
+    "description": "Layer name patterns for department detection",
+    "Mechanical": ["M_*", "*_MECH*", "*_EQUIP*", "PUMP", "VALVE", "FITTING"],
+    "Electrical": ["E_*", "*_ELEC*", "*_POWER*", "CABLE", "CONDUIT"],
+    "Instrumentation": ["I_*", "*_INST*", "INSTRUMENT", "SENSOR"],
+    "Piping": ["P_*", "*_PIPE*", "PIPELINE"],
+    "Civil": ["C_*", "*_CIVIL*", "STRUCTURAL", "CSA"]
+  }
 }
+

@@ -8,11 +8,15 @@ namespace HelloWorldNET
     /// Rules are loaded from fingerprints.json and used to match anonymous blocks
     /// to semantic asset types (e.g., INSTRUMENT_BUBBLE, VALVE_GATE, etc.).
     /// Multiple rules can match the same block; all matches are returned separated by " / ".
+    /// 
+    /// Rules are filtered by department first, then matched against geometry constraints.
+    /// This allows different departments to classify the same symbol differently.
     /// </summary>
     public class FingerprintRule
     {
         public string AssignedName { get; set; }
         public string Description { get; set; }
+        public string Department { get; set; }  // e.g., "Mechanical", "Electrical", "Instrumentation", "Piping"
         public GeometryConstraints GeometryMatch { get; set; }
 
         /// <summary>

@@ -87,7 +87,9 @@ namespace HelloWorldNET
                         else if (entity is BlockReference blockRef)
                         {
                             entityData["Position"] = new { X = blockRef.Position.X, Y = blockRef.Position.Y, Z = blockRef.Position.Z };
-                            entityData["BlockName"] = blockRef.Name;
+                            // CRITICAL FIX: Translate anonymous/dynamic block names using fingerprinting
+                            string translatedBlockName = GetTranslatedBlockName(blockRef, tr);
+                            entityData["BlockName"] = translatedBlockName;
                             entityData["Rotation"] = blockRef.Rotation;
                             entityData["ScaleX"] = blockRef.ScaleFactors.X;
                             entityData["ScaleY"] = blockRef.ScaleFactors.Y;
@@ -1199,7 +1201,7 @@ namespace HelloWorldNET
                                 {
                                     semanticEntity["asset_type"] = "Equipment";
                                     semanticEntity["position"] = new { X = blockRef.Position.X, Y = blockRef.Position.Y, Z = blockRef.Position.Z };
-                                    meta["block_name"] = blockRef.Name;
+                                    meta["block_name"] = GetTranslatedBlockName(blockRef, tr);
                                     meta["rotation"] = blockRef.Rotation;
                                     meta["scale_x"] = blockRef.ScaleFactors.X;
                                     meta["scale_y"] = blockRef.ScaleFactors.Y;
@@ -1515,19 +1517,14 @@ namespace HelloWorldNET
                             {
                                 semanticEntity["asset_type"] = "Equipment";
                                 semanticEntity["position"] = new { X = blockRef.Position.X, Y = blockRef.Position.Y, Z = blockRef.Position.Z };
-                                meta["block_name"] = blockRef.Name;
+
+                                // This perfectly extracts "STRAINER", "PRESSURE_GAUGE", or the standard block name
+                                meta["block_name"] = GetTranslatedBlockName(blockRef, tr);
+
                                 meta["rotation"] = blockRef.Rotation;
                                 meta["scale_x"] = blockRef.ScaleFactors.X;
                                 meta["scale_y"] = blockRef.ScaleFactors.Y;
                                 meta["scale_z"] = blockRef.ScaleFactors.Z;
-
-                                // FINGERPRINTING: If anonymous block, classify it
-                                if (blockRef.Name.StartsWith("*"))
-                                {
-                                    string fingerprintResult = FingerprintAnonymousBlock(blockRef.BlockId, tr, ed, department);
-                                    meta["block_fingerprint"] = fingerprintResult;
-                                    semanticEntity["asset_type"] = fingerprintResult;  // Override with fingerprinted type
-                                }
 
                                 // CRITICAL: Extract block attributes directly into metadata (unified structure)
                                 foreach (ObjectId attId in blockRef.AttributeCollection)
@@ -1936,7 +1933,7 @@ namespace HelloWorldNET
 
         /// <summary>
         /// Extracts semantic metadata for BlockReference entities, including block name and attributes.
-        /// Handles dynamic blocks properly.
+        /// Handles dynamic blocks properly and translates anonymous block names.
         /// </summary>
         private Dictionary<string, object> ExtractBlockReferenceMetadata(BlockReference blockRef, Transaction tr)
         {
@@ -1946,8 +1943,9 @@ namespace HelloWorldNET
             {
                 try
                 {
-                    // Extract block name
-                    metadata["block_name"] = blockRef.Name ?? "";
+                    // Extract block name - handles dynamic blocks and translates anonymous names
+                    string blockName = GetTranslatedBlockName(blockRef, tr);
+                    metadata["block_name"] = blockName ?? "";
 
                     // Check if this is a dynamic block
                     bool isDynamicBlock = blockRef.IsDynamicBlock;
@@ -1992,6 +1990,91 @@ namespace HelloWorldNET
             }
 
             return metadata;
+        }
+
+        /// <summary>
+        /// Translates anonymous or dynamic block names to their semantic equivalents using the fingerprinting engine.
+        /// This integrates with fingerprints.json to dynamically classify blocks based on geometry.
+        /// 
+        /// Priority: Dictionary lookup ALWAYS takes precedence over fingerprinting.
+        /// </summary>
+        private string GetTranslatedBlockName(BlockReference blockRef, Transaction tr)
+        {
+            string targetName = blockRef.Name ?? "";
+
+            try
+            {
+                // 1. Resolve true name if Dynamic Block (DO NOT return early!)
+                if (blockRef.IsDynamicBlock)
+                {
+                    try
+                    {
+                        BlockTableRecord dynamicBlockDef = (BlockTableRecord)tr.GetObject(blockRef.DynamicBlockTableRecord, OpenMode.ForRead);
+                        if (!string.IsNullOrEmpty(dynamicBlockDef.Name))
+                        {
+                            targetName = dynamicBlockDef.Name;
+                        }
+                    }
+                    catch { }
+                }
+
+                // 2. Check Dictionary and Fingerprint against the TARGET name
+                if (targetName.StartsWith("*") || targetName.Contains("$"))
+                {
+                    // PRIORITY 1: Check Dictionary FIRST
+                    string dictMatch = LookupBlockTranslation(targetName);
+                    if (!string.IsNullOrEmpty(dictMatch))
+                    {
+                        return dictMatch; // Safely returns "STRAINER" or "PRESSURE_GAUGE"
+                    }
+
+                    // PRIORITY 2: Fallback to Fingerprinting
+                    string fingerprintResult = FingerprintAnonymousBlock(blockRef.BlockId, tr, null, null);
+                    if (!string.IsNullOrEmpty(fingerprintResult) && fingerprintResult != "UNKNOWN_COMPONENT")
+                    {
+                        return fingerprintResult;
+                    }
+                }
+
+                // 3. Fallback to the target name if no rules match
+                return targetName;
+            }
+            catch (System.Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Error in GetTranslatedBlockName: {ex.Message}");
+                return targetName;
+            }
+        }
+
+        /// <summary>
+        /// Looks up anonymous block name translations from a block dictionary.
+        /// This method maps raw anonymous block names to their semantic equivalents.
+        /// Example: A$C157444E+3 maps to "STRAINER", A$C04F129AC maps to "CHECK_VALVE", etc.
+        /// </summary>
+        private string LookupBlockTranslation(string anonymousName)
+        {
+            // Block dictionary mapping anonymous block names to semantic names
+            // Populate this dictionary with your actual block name mappings from the drawing
+            Dictionary<string, string> blockDictionary = new Dictionary<string, string>
+            {
+                // Add mappings discovered from your drawing here
+                // Format: { "raw_anonymous_name", "semantic_name" }
+                { "A$C157444E+3", "STRAINER" },
+                { "A$C04F129AC", "CHECK_VALVE" },
+                { "*X109", "PRESSURE_GAUGE" }
+            };
+
+            // Check if translation exists
+            if (blockDictionary.ContainsKey(anonymousName))
+            {
+                string translated = blockDictionary[anonymousName];
+                System.Diagnostics.Debug.WriteLine($"Block translation: {anonymousName} -> {translated}");
+                return translated;
+            }
+
+            // Log unmatched anonymous blocks for debugging
+            System.Diagnostics.Debug.WriteLine($"No translation found for anonymous block: {anonymousName}");
+            return null;
         }
 
         /// <summary>
@@ -2207,6 +2290,7 @@ namespace HelloWorldNET
 
         /// <summary>
         /// Determines department based on layer name using common naming conventions.
+        /// Department codes are defined in fingerprints.json and database.
         /// Returns empty string for "Generic" (matches all-department rules).
         /// </summary>
         private string DetermineDepartmentFromLayer(string layerName)
@@ -2216,32 +2300,32 @@ namespace HelloWorldNET
 
             layerName = layerName.ToUpper();
 
-            // Mechanical: M_*, *_MECH*, *_EQUIPMENT*
+            // Mechanical: M_*, *_MECH*, *_EQUIPMENT*, PUMP, VALVE, FITTING
             if (layerName.StartsWith("M_") || layerName.Contains("_MECH") || 
                 layerName.Contains("_EQUIP") || layerName.Contains("PUMP") || 
                 layerName.Contains("VALVE") || layerName.Contains("FITTING"))
-                return "Mechanical";
+                return "MECHANICAL";
 
-            // Electrical: E_*, *_ELEC*, *_POWER*
+            // Electrical: E_*, *_ELEC*, *_POWER*, CABLE, CONDUIT
             if (layerName.StartsWith("E_") || layerName.Contains("_ELEC") || 
                 layerName.Contains("_POWER") || layerName.Contains("CABLE") || 
                 layerName.Contains("CONDUIT"))
-                return "Electrical";
+                return "ELECTRICAL";
 
-            // Instrumentation: I_*, *_INST*
+            // Instrumentation: I_*, *_INST*, INSTRUMENT, SENSOR
             if (layerName.StartsWith("I_") || layerName.Contains("_INST") || 
                 layerName.Contains("INSTRUMENT") || layerName.Contains("SENSOR"))
-                return "Instrumentation";
+                return "I&C";
 
-            // Piping: P_*, *_PIPE*
+            // Process/Piping: P_*, *_PIPE*, PIPELINE
             if (layerName.StartsWith("P_") || layerName.Contains("_PIPE") || 
                 layerName.Contains("PIPELINE"))
-                return "Piping";
+                return "PROCESS";
 
-            // Civil: C_*, *_CIVIL*
+            // Civil: C_*, *_CIVIL*, STRUCTURAL, CSA
             if (layerName.StartsWith("C_") || layerName.Contains("_CIVIL") || 
-                layerName.Contains("STRUCTURAL"))
-                return "Civil";
+                layerName.Contains("STRUCTURAL") || layerName.Contains("CSA"))
+                return "CSA";
 
             // Default: generic (matches all-department rules)
             return "";

@@ -62,16 +62,20 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="BLOCK_DICTIONARY_FIX.md" />
     <None Include="BUG_FIX_REPORT.md" />
+    <None Include="BUILD_AND_DLL_MANAGEMENT.md" />
     <None Include="config.json" />
     <None Include="DEPARTMENT_FILTERING_GUIDE.md" />
     <None Include="DEPARTMENT_FILTERING_SUMMARY.md" />
     <None Include="DEPARTMENT_IN_REQUEST_CONFIG.md" />
     <None Include="DEPT_FILTERING_QUICK_REFERENCE.md" />
+    <None Include="DEVELOPER_IMPLEMENTATION_CHECKLIST.md" />
     <None Include="ENHANCEMENT_SUMMARY.md" />
     <None Include="EXTRACT_JSON_ONLY_DOCS.md" />
     <None Include="FINAL_BUG_FIX_REPORT.md" />
     <None Include="FINAL_SYSTEM_SUMMARY.md" />
+    <None Include="FINAL_VERIFICATION_CHECKLIST.md" />
     <None Include="FINGERPRINTING_ENGINE_SUMMARY.md" />
     <None Include="FINGERPRINTING_GUIDE.md" />
     <None Include="FINGERPRINTING_TECHNICAL_GUIDE.md" />
@@ -82,11 +86,14 @@
     <None Include="JSON_SERIALIZATION_FIX.md" />
     <None Include="JSON_SERIALIZATION_FIX_SUMMARY.md" />
     <None Include="MTEXT_FORMATTING_FIX.md" />
+    <None Include="NOTEPAD_TEST_GUIDE.md" />
     <None Include="packages.config" />
     <None Include="PRIORITY_REMOVAL_UPDATE.md" />
     <None Include="QUICK_REFERENCE.md" />
+    <None Include="QUICK_START_ACTIONS.md" />
     <None Include="REFACTORING_NOTES.md" />
     <None Include="REGRESSION_FIX.md" />
+    <None Include="SOLUTION_SUMMARY.md" />
     <None Include="VERIFICATION_CHECKLIST.md" />
     <None Include="VERIFICATION_REPORT.md" />
     <None Include="VISUAL_SYSTEM_OVERVIEW.md" />

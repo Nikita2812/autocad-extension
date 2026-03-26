@@ -301,39 +301,75 @@ namespace HelloWorldNET
 
         private List<FingerprintRule> _cachedFingerprintRules;
         private string _fingerprintsConfigPath;
+        private string _rulesSource = "Unknown";
+
+        public string RulesSource => _rulesSource;
 
         /// <summary>
         /// Loads fingerprint rules from the fingerprints.json configuration file.
         /// Rules are cached in memory after first load.
         /// All matching rules are returned separated by " / " (no priority ordering).
         /// </summary>
-        public List<FingerprintRule> LoadFingerprintRules(string configPath = null)
+        public List<FingerprintRule> LoadFingerprintRules(string apiUrl = "https://sesphase2.backend.testing.env.thelinkai.com/fingerprint/config/latest/rules")
         {
-            // Return cached rules if already loaded
-            if (_cachedFingerprintRules != null && !string.IsNullOrEmpty(_fingerprintsConfigPath) && File.Exists(_fingerprintsConfigPath))
+            // Return cached rules if already loaded in this session
+            if (_cachedFingerprintRules != null && _cachedFingerprintRules.Count > 0)
             {
                 return _cachedFingerprintRules;
             }
 
             _cachedFingerprintRules = new List<FingerprintRule>();
+            string json = "";
 
+            // Step 1: Try to fetch from the API Endpoint
             try
             {
-                // Determine fingerprints.json path
-                string fingerprintsPath = configPath ?? GetDefaultFingerprintsPath();
-
-                if (!File.Exists(fingerprintsPath))
+                using (System.Net.Http.HttpClient client = new System.Net.Http.HttpClient())
                 {
-                    System.Diagnostics.Debug.WriteLine($"Fingerprints config not found at: {fingerprintsPath}");
-                    return _cachedFingerprintRules; // Return empty list
-                }
+                    client.DefaultRequestHeaders.Add("accept", "application/json");
+                    client.Timeout = TimeSpan.FromSeconds(10); // Don't hang AutoCAD if offline
 
-                _fingerprintsConfigPath = fingerprintsPath;
-                string json = File.ReadAllText(fingerprintsPath).Trim();
+                    var response = client.GetAsync(apiUrl).Result;
+                    if (response.IsSuccessStatusCode)
+                    {
+                        json = response.Content.ReadAsStringAsync().Result;
+
+                        // SAVE LOCAL CACHE: Backup the API response for offline mode
+                        string cachePath = GetDefaultFingerprintsPath();
+                        File.WriteAllText(cachePath, json, new System.Text.UTF8Encoding(false));
+                        System.Diagnostics.Debug.WriteLine("Successfully fetched and cached fingerprint rules from API.");
+                        _rulesSource = "API";
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"API Fetch failed: {ex.Message}. Falling back to local cache.");
+            }
+
+            // Step 2: Offline Fallback - Load from local cache if API failed
+            if (string.IsNullOrEmpty(json))
+            {
+                string cachePath = GetDefaultFingerprintsPath();
+                if (File.Exists(cachePath))
+                {
+                    json = File.ReadAllText(cachePath).Trim();
+                    _rulesSource = "Local Cache";
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine("Critical: No API connection and no local cache found.");
+                    return _cachedFingerprintRules;
+                }
+            }
+
+            // Step 3: Parse the JSON and map the new "rules" array
+            try
+            {
                 Dictionary<string, object> config = ParseJsonToDictionary(json);
 
-                // Extract the fingerprint_rules array
-                if (config.ContainsKey("fingerprint_rules") && config["fingerprint_rules"] is List<object> rulesArray)
+                // NOTE: Mapping to "rules" instead of "fingerprint_rules" to match the API
+                if (config.ContainsKey("rules") && config["rules"] is List<object> rulesArray)
                 {
                     foreach (var ruleObj in rulesArray)
                     {
@@ -347,13 +383,10 @@ namespace HelloWorldNET
                         }
                     }
                 }
-
-                // Return rules (no sorting - all matches are equally valid)
-                System.Diagnostics.Debug.WriteLine($"Loaded {_cachedFingerprintRules.Count} fingerprint rules from {fingerprintsPath}");
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Error loading fingerprint rules: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"Error parsing fingerprint JSON: {ex.Message}");
             }
 
             return _cachedFingerprintRules;
@@ -395,7 +428,7 @@ namespace HelloWorldNET
                 {
                     AssignedName = GetStringFromDict(ruleDict, "assigned_name", "UNKNOWN"),
                     Description = GetStringFromDict(ruleDict, "description", ""),
-                    Department = GetStringFromDict(ruleDict, "department", "")  // Empty = all departments
+                    Department = GetStringFromDict(ruleDict, "department", "")  // Handles null safely
                 };
 
                 // Parse geometry_match constraints
@@ -444,6 +477,9 @@ namespace HelloWorldNET
             if (dict.ContainsKey(key) && dict[key] != null)
             {
                 string val = dict[key].ToString();
+                // Catch literal JSON "null" from API
+                if (val.ToLower() == "null") return defaultValue; 
+
                 return string.IsNullOrWhiteSpace(val) ? defaultValue : val;
             }
             return defaultValue;

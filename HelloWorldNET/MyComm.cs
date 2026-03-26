@@ -26,6 +26,9 @@ namespace HelloWorldNET
 
             try
             {
+                // Ensure fingerprint rules are loaded (triggers API update check)
+                ConfigManager.GetInstance().GetFingerprintRules();
+
                 List<Dictionary<string, object>> entities = new List<Dictionary<string, object>>();
 
                 using (Transaction tr = db.TransactionManager.StartTransaction())
@@ -258,30 +261,15 @@ namespace HelloWorldNET
 
         private string ConvertToJson(List<Dictionary<string, object>> data)
         {
-            StringBuilder json = new StringBuilder();
-            json.AppendLine("[");
-
-            for (int i = 0; i < data.Count; i++)
+            var wrapper = new Dictionary<string, object>
             {
-                json.AppendLine("  {");
-                var dict = data[i];
-                var keys = dict.Keys.ToList();
+                { "fingerprint_source", ConfigManager.GetInstance().RulesSource },
+                { "extraction_timestamp", DateTime.UtcNow.ToString("o") },
+                { "entities", data }
+            };
 
-                for (int j = 0; j < keys.Count; j++)
-                {
-                    string key = keys[j];
-                    object value = dict[key];
-                    string jsonValue = GetJsonValue(value);
-                    string comma = j < keys.Count - 1 ? "," : "";
-                    json.AppendLine($"    \"{key}\": {jsonValue}{comma}");
-                }
-
-                string entityComma = i < data.Count - 1 ? "," : "";
-                json.AppendLine($"  }}{entityComma}");
-            }
-
-            json.AppendLine("]");
-            return json.ToString();
+            // Use built-in serialization helpers since Newtonsoft.Json is not available in project references
+            return SerializeDictionary(wrapper);
         }
 
         private string GetJsonValue(object value)

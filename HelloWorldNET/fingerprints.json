@@ -3,7 +3,7 @@
     {
       "assigned_name": "INSTRUMENT_BUBBLE",
       "description": "Instrument circle with tag/label text (P-101, T-201, etc.)",
-      "department": "I&C",
+      "department": "",
       "geometry_match": {
         "min_circles": 1,
         "max_circles": 1,
@@ -14,7 +14,7 @@
     {
       "assigned_name": "VALVE_GATE",
       "description": "Gate valve symbol (diamond with connecting lines)",
-      "department": "PROCESS",
+      "department": "",
       "geometry_match": {
         "min_polylines": 1,
         "max_polylines": 3,
@@ -25,7 +25,7 @@
     {
       "assigned_name": "VALVE_CHECK",
       "description": "Check valve (circle with internal line)",
-      "department": "PROCESS",
+      "department": "",
       "geometry_match": {
         "min_circles": 1,
         "max_circles": 1,
@@ -36,7 +36,7 @@
     {
       "assigned_name": "DISCHARGE_CHECK_VALVE",
       "description": "Discharge check valve (at pump outlet or equipment discharge)",
-      "department": "PROCESS",
+      "department": "",
       "geometry_match": {
         "min_circles": 1,
         "max_circles": 1,
@@ -47,7 +47,7 @@
     {
       "assigned_name": "PUMP_CENTRIFUGAL",
       "description": "Centrifugal pump (circle with arrow/line indicating flow)",
-      "department": "MECHANICAL",
+      "department": "",
       "geometry_match": {
         "min_circles": 1,
         "max_circles": 1,
@@ -58,7 +58,7 @@
     {
       "assigned_name": "TEE_FITTING",
       "description": "Tee or junction (multiple polylines meeting)",
-      "department": "PROCESS",
+      "department": "",
       "geometry_match": {
         "min_polylines": 2,
         "max_polylines": 4,
@@ -68,7 +68,7 @@
     {
       "assigned_name": "STRAINER_Y",
       "description": "Y-strainer (hatched shape with legs)",
-      "department": "PROCESS",
+      "department": "",
       "geometry_match": {
         "min_hatches": 1,
         "min_lines": 2,
@@ -78,7 +78,7 @@
     {
       "assigned_name": "BASKET_STRAINER",
       "description": "Basket strainer (suction or discharge, cartridge type)",
-      "department": "PROCESS",
+      "department": "",
       "geometry_match": {
         "min_polylines": 1,
         "max_polylines": 3,
@@ -90,7 +90,7 @@
     {
       "assigned_name": "REDUCER_ECCENTRIC",
       "description": "Eccentric reducer (two concentric circles or complex profile)",
-      "department": "PROCESS",
+      "department": "",
       "geometry_match": {
         "min_circles": 2,
         "max_circles": 2
@@ -99,7 +99,7 @@
     {
       "assigned_name": "ELBOW_45",
       "description": "45-degree elbow",
-      "department": "PROCESS",
+      "department": "",
       "geometry_match": {
         "min_arcs": 1,
         "max_arcs": 1,
@@ -110,7 +110,7 @@
     {
       "assigned_name": "ELBOW_90",
       "description": "90-degree elbow",
-      "department": "PROCESS",
+      "department": "",
       "geometry_match": {
         "min_arcs": 1,
         "max_arcs": 1,
@@ -121,7 +121,7 @@
     {
       "assigned_name": "BLIND_FLANGE",
       "description": "Blank/blind flange (solid circle)",
-      "department": "PROCESS",
+      "department": "",
       "geometry_match": {
         "min_circles": 1,
         "max_circles": 1,
@@ -133,7 +133,7 @@
     {
       "assigned_name": "MOTOR_AC",
       "description": "AC motor (circle with internal marking)",
-      "department": "ELECTRICAL",
+      "department": "",
       "geometry_match": {
         "min_circles": 1,
         "max_circles": 1,
@@ -144,7 +144,7 @@
     {
       "assigned_name": "BREAKER_CIRCUIT",
       "description": "Circuit breaker (rectangular with line)",
-      "department": "ELECTRICAL",
+      "department": "",
       "geometry_match": {
         "min_lines": 2,
         "max_lines": 4,
@@ -155,7 +155,7 @@
     {
       "assigned_name": "TRANSFORMER",
       "description": "Transformer (two circles or coils)",
-      "department": "ELECTRICAL",
+      "department": "",
       "geometry_match": {
         "min_circles": 2,
         "max_circles": 2

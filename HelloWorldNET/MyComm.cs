@@ -1993,10 +1993,9 @@ namespace HelloWorldNET
         }
 
         /// <summary>
-        /// Translates anonymous or dynamic block names to their semantic equivalents using the fingerprinting engine.
-        /// This integrates with fingerprints.json to dynamically classify blocks based on geometry.
-        /// 
-        /// Priority: Dictionary lookup ALWAYS takes precedence over fingerprinting.
+        /// Translates anonymous or dynamic block names to their semantic equivalents using pure geometric fingerprinting.
+        /// This system is 100% data-driven - all block type classifications come from fingerprints.json.
+        /// No C# recompilation needed when updating block mappings.
         /// </summary>
         private string GetTranslatedBlockName(BlockReference blockRef, Transaction tr)
         {
@@ -2004,7 +2003,7 @@ namespace HelloWorldNET
 
             try
             {
-                // 1. Resolve true name if Dynamic Block (DO NOT return early!)
+                // 1. Resolve true name if Dynamic Block (Gets original name)
                 if (blockRef.IsDynamicBlock)
                 {
                     try
@@ -2018,18 +2017,13 @@ namespace HelloWorldNET
                     catch { }
                 }
 
-                // 2. Check Dictionary and Fingerprint against the TARGET name
+                // 2. PURE GEOMETRIC FINGERPRINTING (No Dictionary)
+                // If the name is anonymous (* or $), scan its geometry immediately
                 if (targetName.StartsWith("*") || targetName.Contains("$"))
                 {
-                    // PRIORITY 1: Check Dictionary FIRST
-                    string dictMatch = LookupBlockTranslation(targetName);
-                    if (!string.IsNullOrEmpty(dictMatch))
-                    {
-                        return dictMatch; // Safely returns "STRAINER" or "PRESSURE_GAUGE"
-                    }
-
-                    // PRIORITY 2: Fallback to Fingerprinting
                     string fingerprintResult = FingerprintAnonymousBlock(blockRef.BlockId, tr, null, null);
+
+                    // If the geometry matches a rule in fingerprints.json, return that name
                     if (!string.IsNullOrEmpty(fingerprintResult) && fingerprintResult != "UNKNOWN_COMPONENT")
                     {
                         return fingerprintResult;
@@ -2044,37 +2038,6 @@ namespace HelloWorldNET
                 System.Diagnostics.Debug.WriteLine($"Error in GetTranslatedBlockName: {ex.Message}");
                 return targetName;
             }
-        }
-
-        /// <summary>
-        /// Looks up anonymous block name translations from a block dictionary.
-        /// This method maps raw anonymous block names to their semantic equivalents.
-        /// Example: A$C157444E+3 maps to "STRAINER", A$C04F129AC maps to "CHECK_VALVE", etc.
-        /// </summary>
-        private string LookupBlockTranslation(string anonymousName)
-        {
-            // Block dictionary mapping anonymous block names to semantic names
-            // Populate this dictionary with your actual block name mappings from the drawing
-            Dictionary<string, string> blockDictionary = new Dictionary<string, string>
-            {
-                // Add mappings discovered from your drawing here
-                // Format: { "raw_anonymous_name", "semantic_name" }
-                { "A$C157444E+3", "STRAINER" },
-                { "A$C04F129AC", "CHECK_VALVE" },
-                { "*X109", "PRESSURE_GAUGE" }
-            };
-
-            // Check if translation exists
-            if (blockDictionary.ContainsKey(anonymousName))
-            {
-                string translated = blockDictionary[anonymousName];
-                System.Diagnostics.Debug.WriteLine($"Block translation: {anonymousName} -> {translated}");
-                return translated;
-            }
-
-            // Log unmatched anonymous blocks for debugging
-            System.Diagnostics.Debug.WriteLine($"No translation found for anonymous block: {anonymousName}");
-            return null;
         }
 
         /// <summary>

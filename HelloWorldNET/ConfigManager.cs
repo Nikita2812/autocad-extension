@@ -446,7 +446,9 @@ namespace HelloWorldNET
                 Texts = GetNullableIntFromDict(constraintsDict, "texts") ?? 
                         (GetNullableIntFromDict(constraintsDict, "min_texts") == GetNullableIntFromDict(constraintsDict, "max_texts") 
                             ? GetNullableIntFromDict(constraintsDict, "min_texts") 
-                            : null)
+                            : null),
+
+                AspectRatioHint = GetNullableDecimalFromDict(constraintsDict, "aspect_ratio_hint")
             };
 
             return constraints;
@@ -479,6 +481,18 @@ namespace HelloWorldNET
             if (dict.ContainsKey(key) && dict[key] != null)
             {
                 if (int.TryParse(dict[key].ToString(), out int val))
+                {
+                    return val;
+                }
+            }
+            return null;
+        }
+
+        private decimal? GetNullableDecimalFromDict(Dictionary<string, object> dict, string key)
+        {
+            if (dict.ContainsKey(key) && dict[key] != null)
+            {
+                if (decimal.TryParse(dict[key].ToString(), out decimal val))
                 {
                     return val;
                 }

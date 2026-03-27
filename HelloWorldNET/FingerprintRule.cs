@@ -11,6 +11,11 @@ namespace HelloWorldNET
     /// 
     /// Rules are filtered by department first, then matched against geometry constraints.
     /// This allows different departments to classify the same symbol differently.
+    /// 
+    /// Matching uses a 3-tier hierarchy:
+    /// 1. Tier 1 (Attribute): Use block name/tag if available
+    /// 2. Tier 2 (Geometry): Check exact-match constraints (circles, lines, polylines, etc.)
+    /// 3. Tier 3 (Aspect Ratio): If multiple rules match Tier 2, use aspect ratio ±20% tolerance
     /// </summary>
     public class FingerprintRule
     {
@@ -20,11 +25,11 @@ namespace HelloWorldNET
         public GeometryConstraints GeometryMatch { get; set; }
 
         /// <summary>
-        /// Evaluates whether a given geometry tally matches all constraints in this rule.
-        /// All constraints that are set (not null) must match exactly.
-        /// Unset (null) constraints accept any count.
+        /// Evaluates whether a given geometry tally matches this rule using 3-tier matching:
+        /// Tier 2 (Geometry): All set constraints must match exactly.
+        /// Tier 3 (Aspect Ratio): If AspectRatioHint is set, validate bounding box aspect ratio ±20%.
         /// </summary>
-        public bool IsMatch(GeometryTally tally)
+        public bool IsMatch(GeometryTally tally, decimal? boundingBoxAspectRatio = null)
         {
             if (tally == null)
                 return false;
@@ -32,6 +37,35 @@ namespace HelloWorldNET
             if (GeometryMatch == null)
                 return true; // Rule with no constraints matches everything
 
+            // TIER 2: Check geometry constraints
+            if (!MatchesGeometry(tally))
+                return false;
+
+            // TIER 3: Check aspect ratio tie-breaker if both rule hint and calculated ratio are available
+            if (boundingBoxAspectRatio.HasValue && GeometryMatch.AspectRatioHint.HasValue)
+            {
+                decimal hintRatio = GeometryMatch.AspectRatioHint.Value;
+                decimal tolerance = hintRatio * 0.20m;  // ±20% tolerance
+                decimal minRatio = hintRatio - tolerance;
+                decimal maxRatio = hintRatio + tolerance;
+
+                decimal calculatedRatio = boundingBoxAspectRatio.Value;
+
+                // Aspect ratio must be within ±20% of hint
+                if (calculatedRatio < minRatio || calculatedRatio > maxRatio)
+                    return false;
+            }
+
+            // All constraints satisfied
+            return true;
+        }
+
+        /// <summary>
+        /// TIER 2 matching: Evaluates geometry constraints exactly.
+        /// All set constraints must match; unset (null) constraints accept any count.
+        /// </summary>
+        private bool MatchesGeometry(GeometryTally tally)
+        {
             // Check circles (exact match if set)
             if (GeometryMatch.Circles.HasValue && tally.Circles != GeometryMatch.Circles.Value)
                 return false;
@@ -56,7 +90,6 @@ namespace HelloWorldNET
             if (GeometryMatch.Texts.HasValue && tally.Texts != GeometryMatch.Texts.Value)
                 return false;
 
-            // All constraints satisfied
             return true;
         }
 
@@ -70,6 +103,7 @@ namespace HelloWorldNET
     /// Defines the geometric constraints for a fingerprint rule.
     /// Each constraint is nullable—unset (null) constraints accept any count.
     /// Set constraints must match exactly.
+    /// AspectRatioHint provides collision-resistant disambiguation when multiple rules match.
     /// </summary>
     public class GeometryConstraints
     {
@@ -79,6 +113,7 @@ namespace HelloWorldNET
         public int? Arcs { get; set; }
         public int? Hatches { get; set; }
         public int? Texts { get; set; }
+        public decimal? AspectRatioHint { get; set; }  // Width/Height ratio for collision resolution (±20% tolerance)
     }
 
     /// <summary>

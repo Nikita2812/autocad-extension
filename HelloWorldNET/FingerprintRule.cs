@@ -11,6 +11,11 @@ namespace HelloWorldNET
     /// 
     /// Rules are filtered by department first, then matched against geometry constraints.
     /// This allows different departments to classify the same symbol differently.
+    /// 
+    /// Matching uses a 3-tier hierarchy:
+    /// 1. Tier 1 (Attribute): Use block name/tag if available
+    /// 2. Tier 2 (Geometry): Check exact-match constraints (circles, lines, polylines, etc.)
+    /// 3. Tier 3 (Aspect Ratio): If multiple rules match Tier 2, use aspect ratio ±20% tolerance
     /// </summary>
     public class FingerprintRule
     {
@@ -20,10 +25,11 @@ namespace HelloWorldNET
         public GeometryConstraints GeometryMatch { get; set; }
 
         /// <summary>
-        /// Evaluates whether a given geometry tally matches all constraints in this rule.
-        /// All constraints that are set (not null) must be satisfied for a match.
+        /// Evaluates whether a given geometry tally matches this rule using 3-tier matching:
+        /// Tier 2 (Geometry): All set constraints must match exactly.
+        /// Tier 3 (Aspect Ratio): If AspectRatioHint is set, validate bounding box aspect ratio ±20%.
         /// </summary>
-        public bool IsMatch(GeometryTally tally)
+        public bool IsMatch(GeometryTally tally, decimal? boundingBoxAspectRatio = null)
         {
             if (tally == null)
                 return false;
@@ -31,43 +37,59 @@ namespace HelloWorldNET
             if (GeometryMatch == null)
                 return true; // Rule with no constraints matches everything
 
-            // Check circles
-            if (GeometryMatch.MinCircles.HasValue && tally.Circles < GeometryMatch.MinCircles.Value)
-                return false;
-            if (GeometryMatch.MaxCircles.HasValue && tally.Circles > GeometryMatch.MaxCircles.Value)
+            // TIER 2: Check geometry constraints
+            if (!MatchesGeometry(tally))
                 return false;
 
-            // Check lines
-            if (GeometryMatch.MinLines.HasValue && tally.Lines < GeometryMatch.MinLines.Value)
-                return false;
-            if (GeometryMatch.MaxLines.HasValue && tally.Lines > GeometryMatch.MaxLines.Value)
-                return false;
+            // TIER 3: Check aspect ratio tie-breaker if both rule hint and calculated ratio are available
+            if (boundingBoxAspectRatio.HasValue && GeometryMatch.AspectRatioHint.HasValue)
+            {
+                decimal hintRatio = GeometryMatch.AspectRatioHint.Value;
+                decimal tolerance = hintRatio * 0.20m;  // ±20% tolerance
+                decimal minRatio = hintRatio - tolerance;
+                decimal maxRatio = hintRatio + tolerance;
 
-            // Check polylines
-            if (GeometryMatch.MinPolylines.HasValue && tally.Polylines < GeometryMatch.MinPolylines.Value)
-                return false;
-            if (GeometryMatch.MaxPolylines.HasValue && tally.Polylines > GeometryMatch.MaxPolylines.Value)
-                return false;
+                decimal calculatedRatio = boundingBoxAspectRatio.Value;
 
-            // Check arcs
-            if (GeometryMatch.MinArcs.HasValue && tally.Arcs < GeometryMatch.MinArcs.Value)
-                return false;
-            if (GeometryMatch.MaxArcs.HasValue && tally.Arcs > GeometryMatch.MaxArcs.Value)
-                return false;
-
-            // Check hatches
-            if (GeometryMatch.MinHatches.HasValue && tally.Hatches < GeometryMatch.MinHatches.Value)
-                return false;
-            if (GeometryMatch.MaxHatches.HasValue && tally.Hatches > GeometryMatch.MaxHatches.Value)
-                return false;
-
-            // Check texts
-            if (GeometryMatch.MinTexts.HasValue && tally.Texts < GeometryMatch.MinTexts.Value)
-                return false;
-            if (GeometryMatch.MaxTexts.HasValue && tally.Texts > GeometryMatch.MaxTexts.Value)
-                return false;
+                // Aspect ratio must be within ±20% of hint
+                if (calculatedRatio < minRatio || calculatedRatio > maxRatio)
+                    return false;
+            }
 
             // All constraints satisfied
+            return true;
+        }
+
+        /// <summary>
+        /// TIER 2 matching: Evaluates geometry constraints exactly.
+        /// All set constraints must match; unset (null) constraints accept any count.
+        /// </summary>
+        private bool MatchesGeometry(GeometryTally tally)
+        {
+            // Check circles (exact match if set)
+            if (GeometryMatch.Circles.HasValue && tally.Circles != GeometryMatch.Circles.Value)
+                return false;
+
+            // Check lines (exact match if set)
+            if (GeometryMatch.Lines.HasValue && tally.Lines != GeometryMatch.Lines.Value)
+                return false;
+
+            // Check polylines (exact match if set)
+            if (GeometryMatch.Polylines.HasValue && tally.Polylines != GeometryMatch.Polylines.Value)
+                return false;
+
+            // Check arcs (exact match if set)
+            if (GeometryMatch.Arcs.HasValue && tally.Arcs != GeometryMatch.Arcs.Value)
+                return false;
+
+            // Check hatches (exact match if set)
+            if (GeometryMatch.Hatches.HasValue && tally.Hatches != GeometryMatch.Hatches.Value)
+                return false;
+
+            // Check texts (exact match if set)
+            if (GeometryMatch.Texts.HasValue && tally.Texts != GeometryMatch.Texts.Value)
+                return false;
+
             return true;
         }
 
@@ -79,27 +101,19 @@ namespace HelloWorldNET
 
     /// <summary>
     /// Defines the geometric constraints for a fingerprint rule.
-    /// Each constraint is nullable—unset (null) constraints are unconstrained.
+    /// Each constraint is nullable—unset (null) constraints accept any count.
+    /// Set constraints must match exactly.
+    /// AspectRatioHint provides collision-resistant disambiguation when multiple rules match.
     /// </summary>
     public class GeometryConstraints
     {
-        public int? MinCircles { get; set; }
-        public int? MaxCircles { get; set; }
-
-        public int? MinLines { get; set; }
-        public int? MaxLines { get; set; }
-
-        public int? MinPolylines { get; set; }
-        public int? MaxPolylines { get; set; }
-
-        public int? MinArcs { get; set; }
-        public int? MaxArcs { get; set; }
-
-        public int? MinHatches { get; set; }
-        public int? MaxHatches { get; set; }
-
-        public int? MinTexts { get; set; }
-        public int? MaxTexts { get; set; }
+        public int? Circles { get; set; }
+        public int? Lines { get; set; }
+        public int? Polylines { get; set; }
+        public int? Arcs { get; set; }
+        public int? Hatches { get; set; }
+        public int? Texts { get; set; }
+        public decimal? AspectRatioHint { get; set; }  // Width/Height ratio for collision resolution (±20% tolerance)
     }
 
     /// <summary>

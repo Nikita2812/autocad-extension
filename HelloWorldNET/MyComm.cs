@@ -2116,14 +2116,17 @@ namespace HelloWorldNET
                 if (ed != null)
                     ed.WriteMessage($"\n  → Department: {blockDepartment} (from {departmentSource})");
 
-                // 2. Tally all geometry inside the anonymous block
+                // 2. Tally all geometry inside the anonymous block AND collect entities for aspect ratio calculation
                 GeometryTally tally = new GeometryTally();
+                DBObjectCollection allEntities = new DBObjectCollection();
 
                 foreach (ObjectId id in blockDef)
                 {
                     try
                     {
                         Entity ent = (Entity)tr.GetObject(id, OpenMode.ForRead);
+                        allEntities.Add(ent);  // Collect for aspect ratio calculation
+                        
                         if (ent is Circle)
                             tally.Circles++;
                         else if (ent is Line)
@@ -2139,6 +2142,9 @@ namespace HelloWorldNET
                     }
                     catch { }
                 }
+
+                // Calculate bounding box aspect ratio for collision-resistant matching (Tier 3)
+                decimal? boundingBoxAspectRatio = CalculateBoundingBoxAspectRatio(allEntities, tr);
 
                 // 3. Load fingerprint rules from configuration
                 ConfigManager configMgr = ConfigManager.GetInstance();
@@ -2172,12 +2178,12 @@ namespace HelloWorldNET
                     return "UNKNOWN_COMPONENT";
                 }
 
-                // 5. Collect ALL matching rules
+                // 5. Collect ALL matching rules (with aspect ratio tie-breaker for collision resolution)
                 List<string> matches = new List<string>();
 
                 foreach (FingerprintRule rule in applicableRules)
                 {
-                    if (rule.IsMatch(tally))
+                    if (rule.IsMatch(tally, boundingBoxAspectRatio))
                     {
                         matches.Add(rule.AssignedName);
                     }
@@ -2216,33 +2222,53 @@ namespace HelloWorldNET
         /// Determines the department of a block based on layer naming conventions.
         /// 
         /// Common layer naming patterns:
-        /// - "M_*" or "*_MECH*" → Mechanical
-        /// - "E_*" or "*_ELEC*" → Electrical
-        /// - "I_*" or "*_INST*" → Instrumentation
-        /// - "P_*" or "*_PIPE*" → Piping
-        /// - Otherwise → Generic (matches all-department rules)
+        /// - "M_*" or "*_MECH*" → MECHANICAL
+        /// - "E_*" or "*_ELEC*" → ELECTRICAL
+        /// - "I_*" or "*_INST*" → I&C
+        /// - "P_*" or "*_PIPE*" → PROCESS
+        /// - "C_*" or "*_CIVIL*" → CSA
+        /// - Otherwise → "" (generic, matches all-department rules)
+        /// 
+        /// Department codes MUST match database values:
+        /// CSA, MECHANICAL, ELECTRICAL, PROCESS, I&C, HSE
         /// </summary>
         private string DetermineDepartmentFromEntity(ObjectId blockRefId, Transaction tr)
         {
             try
             {
-                // For anonymous blocks, we determine department from layer of the BlockReference
-                // that uses them. Since we're in extraction, we can use a simple heuristic.
-                // In a real scenario, you might store department in block attributes or xdata.
-
-                // For now, return "Generic" to match all-department rules
-                return "Generic";
+                // Get the block table record to extract layer information
+                BlockTableRecord blockRec = (BlockTableRecord)tr.GetObject(blockRefId, OpenMode.ForRead);
+                
+                // Try to get layer name from the block's owner (if it's a block reference with a layer)
+                // For anonymous blocks, check if there's layer information we can use
+                string layerName = "";
+                
+                // If we can access the layer, use it for department detection
+                if (!string.IsNullOrWhiteSpace(blockRec.Name) && !blockRec.IsAnonymous)
+                {
+                    // For named blocks, use the block name in detection
+                    layerName = blockRec.Name;
+                }
+                
+                // Fallback: return empty string for generic (matches all departments)
+                // This allows rules without explicit department constraints to match
+                if (string.IsNullOrWhiteSpace(layerName))
+                    return "";
+                
+                return DetermineDepartmentFromLayer(layerName);
             }
             catch
             {
-                return "Generic";
+                return "";  // Generic - matches all
             }
         }
 
         /// <summary>
-        /// Determines department based on layer name using common naming conventions.
-        /// Department codes are defined in fingerprints.json and database.
-        /// Returns empty string for "Generic" (matches all-department rules).
+        /// Determines department based on layer/block name using common naming conventions.
+        /// Department codes MUST match database values:
+        /// CSA, MECHANICAL, ELECTRICAL, PROCESS, I&C, HSE
+        /// 
+        /// Returns empty string "" for "generic" (matches all-department rules).
         /// </summary>
         private string DetermineDepartmentFromLayer(string layerName)
         {
@@ -2263,7 +2289,7 @@ namespace HelloWorldNET
                 layerName.Contains("CONDUIT"))
                 return "ELECTRICAL";
 
-            // Instrumentation: I_*, *_INST*, INSTRUMENT, SENSOR
+            // Instrumentation & Control: I_*, *_INST*, INSTRUMENT, SENSOR
             if (layerName.StartsWith("I_") || layerName.Contains("_INST") || 
                 layerName.Contains("INSTRUMENT") || layerName.Contains("SENSOR"))
                 return "I&C";
@@ -2273,13 +2299,66 @@ namespace HelloWorldNET
                 layerName.Contains("PIPELINE"))
                 return "PROCESS";
 
-            // Civil: C_*, *_CIVIL*, STRUCTURAL, CSA
+            // Civil/Structural: C_*, *_CIVIL*, STRUCTURAL, *_CSA*
             if (layerName.StartsWith("C_") || layerName.Contains("_CIVIL") || 
-                layerName.Contains("STRUCTURAL") || layerName.Contains("CSA"))
+                layerName.Contains("STRUCTURAL") || layerName.Contains("_CSA"))
                 return "CSA";
+
+            // Health, Safety & Environment: H_*, *_HSE*, SAFETY
+            if (layerName.StartsWith("H_") || layerName.Contains("_HSE") || 
+                layerName.Contains("SAFETY"))
+                return "HSE";
 
             // Default: generic (matches all-department rules)
             return "";
         }
+
+        /// <summary>
+        /// Calculates the bounding box aspect ratio (Width / Height) of all entities.
+        /// Used for Tier 3 collision-resistant matching: distinguishes equipment with 
+        /// identical geometry but different proportions (e.g., TANK_HORIZONTAL vs HEAT_EXCHANGER).
+        /// 
+        /// Returns null if height is 0 or bounding box cannot be calculated.
+        /// </summary>
+        private decimal? CalculateBoundingBoxAspectRatio(DBObjectCollection entities, Transaction tr)
+        {
+            if (entities == null || entities.Count == 0)
+                return null;
+
+            try
+            {
+                double minX = double.MaxValue;
+                double maxX = double.MinValue;
+                double minY = double.MaxValue;
+                double maxY = double.MinValue;
+                bool hasValidCoordinates = false;
+
+                // Iterate through all entities to find bounding box
+                foreach (object obj in entities)
+                {
+                    Entity ent = obj as Entity;
+                    if (ent == null) continue;
+
+                    try
+                    {
+                        if (ent is Circle)
+                        {
+                            Circle circ = (Circle)ent;
+                            minX = Math.Min(minX, circ.Center.X - circ.Radius);
+                            maxX = Math.Max(maxX, circ.Center.X + circ.Radius);
+                            minY = Math.Min(minY, circ.Center.Y - circ.Radius);
+                            maxY = Math.Max(maxY, circ.Center.Y + circ.Radius);
+                            hasValidCoordinates = true;
+                        }
+                        else if (ent is Line)
+                        {
+                            Line line = (Line)ent;
+                            minX = Math.Min(minX, line.StartPoint.X);
+                            minX = Math.Min(minX, line.EndPoint.X);\n                            maxX = Math.Max(maxX, line.StartPoint.X);\n                            maxX = Math.Max(maxX, line.EndPoint.X);\n                            minY = Math.Min(minY, line.StartPoint.Y);\n                            minY = Math.Min(minY, line.EndPoint.Y);\n                            maxY = Math.Max(maxY, line.StartPoint.Y);\n                            maxY = Math.Max(maxY, line.EndPoint.Y);\n                            hasValidCoordinates = true;\n                        }\n                        else if (ent is Arc)\n                        {
+                            Arc arc = (Arc)ent;\n                            // Get bounding box by checking arc start, end, and center\n                            minX = Math.Min(minX, arc.Center.X - arc.Radius);\n                            maxX = Math.Max(maxX, arc.Center.X + arc.Radius);\n                            minY = Math.Min(minY, arc.Center.Y - arc.Radius);\n                            maxY = Math.Max(maxY, arc.Center.Y + arc.Radius);\n                            hasValidCoordinates = true;\n                        }\n                        else if (ent is Polyline)\n                        {
+                            Polyline poly = (Polyline)ent;\n                            for (int i = 0; i < poly.NumberOfVertices; i++)\n                            {\n                                Point3d pt = poly.GetPoint3dAt(i);\n                                minX = Math.Min(minX, pt.X);\n                                maxX = Math.Max(maxX, pt.X);\n                                minY = Math.Min(minY, pt.Y);\n                                maxY = Math.Max(maxY, pt.Y);\n                                hasValidCoordinates = true;\n                            }\n                        }\n                        else if (ent is DBText)\n                        {
+                            DBText txt = (DBText)ent;\n                            minX = Math.Min(minX, txt.Position.X);\n                            maxX = Math.Max(maxX, txt.Position.X);\n                            minY = Math.Min(minY, txt.Position.Y);\n                            maxY = Math.Max(maxY, txt.Position.Y);\n                            hasValidCoordinates = true;\n                        }\n                        else if (ent is MText)\n                        {
+                            MText mtxt = (MText)ent;\n                            minX = Math.Min(minX, mtxt.Location.X);\n                            maxX = Math.Max(maxX, mtxt.Location.X);\n                            minY = Math.Min(minY, mtxt.Location.Y);\n                            maxY = Math.Max(maxY, mtxt.Location.Y);\n                            hasValidCoordinates = true;\n                        }\n                        else if (ent is Hatch)\n                        {
+                            Hatch hatch = (Hatch)ent;\n                            // Get hatch bounds\n                            Extents3d bounds = hatch.GeometricExtents;\n                            minX = Math.Min(minX, bounds.MinPoint.X);\n                            maxX = Math.Max(maxX, bounds.MaxPoint.X);\n                            minY = Math.Min(minY, bounds.MinPoint.Y);\n                            maxY = Math.Max(maxY, bounds.MaxPoint.Y);\n                            hasValidCoordinates = true;\n                        }\n                    }\n                    catch { /* Skip entities that fail bounds calculation */ }\n                }\n\n                // Calculate aspect ratio\n                if (!hasValidCoordinates)\n                    return null;\n\n                double width = maxX - minX;\n                double height = maxY - minY;\n\n                if (height <= 0)\n                    return null;\n\n                decimal aspectRatio = (decimal)(width / height);\n                return aspectRatio;\n            }\n            catch (System.Exception ex)\n            {\n                System.Diagnostics.Debug.WriteLine($\"Error calculating bounding box aspect ratio: {ex.Message}\");\n                return null;\n            }\n        }
     }
 }

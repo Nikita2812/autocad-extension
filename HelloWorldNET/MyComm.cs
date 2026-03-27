@@ -2228,33 +2228,53 @@ namespace HelloWorldNET
         /// Determines the department of a block based on layer naming conventions.
         /// 
         /// Common layer naming patterns:
-        /// - "M_*" or "*_MECH*" → Mechanical
-        /// - "E_*" or "*_ELEC*" → Electrical
-        /// - "I_*" or "*_INST*" → Instrumentation
-        /// - "P_*" or "*_PIPE*" → Piping
-        /// - Otherwise → Generic (matches all-department rules)
+        /// - "M_*" or "*_MECH*" → MECHANICAL
+        /// - "E_*" or "*_ELEC*" → ELECTRICAL
+        /// - "I_*" or "*_INST*" → I&C
+        /// - "P_*" or "*_PIPE*" → PROCESS
+        /// - "C_*" or "*_CIVIL*" → CSA
+        /// - Otherwise → "" (generic, matches all-department rules)
+        /// 
+        /// Department codes MUST match database values:
+        /// CSA, MECHANICAL, ELECTRICAL, PROCESS, I&C, HSE
         /// </summary>
         private string DetermineDepartmentFromEntity(ObjectId blockRefId, Transaction tr)
         {
             try
             {
-                // For anonymous blocks, we determine department from layer of the BlockReference
-                // that uses them. Since we're in extraction, we can use a simple heuristic.
-                // In a real scenario, you might store department in block attributes or xdata.
-
-                // For now, return "Generic" to match all-department rules
-                return "Generic";
+                // Get the block table record to extract layer information
+                BlockTableRecord blockRec = (BlockTableRecord)tr.GetObject(blockRefId, OpenMode.ForRead);
+                
+                // Try to get layer name from the block's owner (if it's a block reference with a layer)
+                // For anonymous blocks, check if there's layer information we can use
+                string layerName = "";
+                
+                // If we can access the layer, use it for department detection
+                if (!string.IsNullOrWhiteSpace(blockRec.Name) && !blockRec.IsAnonymous)
+                {
+                    // For named blocks, use the block name in detection
+                    layerName = blockRec.Name;
+                }
+                
+                // Fallback: return empty string for generic (matches all departments)
+                // This allows rules without explicit department constraints to match
+                if (string.IsNullOrWhiteSpace(layerName))
+                    return "";
+                
+                return DetermineDepartmentFromLayer(layerName);
             }
             catch
             {
-                return "Generic";
+                return "";  // Generic - matches all
             }
         }
 
         /// <summary>
-        /// Determines department based on layer name using common naming conventions.
-        /// Department codes are defined in fingerprints.json and database.
-        /// Returns empty string for "Generic" (matches all-department rules).
+        /// Determines department based on layer/block name using common naming conventions.
+        /// Department codes MUST match database values:
+        /// CSA, MECHANICAL, ELECTRICAL, PROCESS, I&C, HSE
+        /// 
+        /// Returns empty string "" for "generic" (matches all-department rules).
         /// </summary>
         private string DetermineDepartmentFromLayer(string layerName)
         {
@@ -2275,7 +2295,7 @@ namespace HelloWorldNET
                 layerName.Contains("CONDUIT"))
                 return "ELECTRICAL";
 
-            // Instrumentation: I_*, *_INST*, INSTRUMENT, SENSOR
+            // Instrumentation & Control: I_*, *_INST*, INSTRUMENT, SENSOR
             if (layerName.StartsWith("I_") || layerName.Contains("_INST") || 
                 layerName.Contains("INSTRUMENT") || layerName.Contains("SENSOR"))
                 return "I&C";
@@ -2285,10 +2305,15 @@ namespace HelloWorldNET
                 layerName.Contains("PIPELINE"))
                 return "PROCESS";
 
-            // Civil: C_*, *_CIVIL*, STRUCTURAL, CSA
+            // Civil/Structural: C_*, *_CIVIL*, STRUCTURAL, *_CSA*
             if (layerName.StartsWith("C_") || layerName.Contains("_CIVIL") || 
-                layerName.Contains("STRUCTURAL") || layerName.Contains("CSA"))
+                layerName.Contains("STRUCTURAL") || layerName.Contains("_CSA"))
                 return "CSA";
+
+            // Health, Safety & Environment: H_*, *_HSE*, SAFETY
+            if (layerName.StartsWith("H_") || layerName.Contains("_HSE") || 
+                layerName.Contains("SAFETY"))
+                return "HSE";
 
             // Default: generic (matches all-department rules)
             return "";

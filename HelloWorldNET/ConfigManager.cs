@@ -417,23 +417,36 @@ namespace HelloWorldNET
         {
             var constraints = new GeometryConstraints
             {
-                MinCircles = GetNullableIntFromDict(constraintsDict, "min_circles"),
-                MaxCircles = GetNullableIntFromDict(constraintsDict, "max_circles"),
+                // Try exact match format first (circles, lines, etc.), fallback to legacy range format (min_circles, max_circles)
+                Circles = GetNullableIntFromDict(constraintsDict, "circles") ?? 
+                          (GetNullableIntFromDict(constraintsDict, "min_circles") == GetNullableIntFromDict(constraintsDict, "max_circles") 
+                              ? GetNullableIntFromDict(constraintsDict, "min_circles") 
+                              : null),
 
-                MinLines = GetNullableIntFromDict(constraintsDict, "min_lines"),
-                MaxLines = GetNullableIntFromDict(constraintsDict, "max_lines"),
+                Lines = GetNullableIntFromDict(constraintsDict, "lines") ?? 
+                        (GetNullableIntFromDict(constraintsDict, "min_lines") == GetNullableIntFromDict(constraintsDict, "max_lines") 
+                            ? GetNullableIntFromDict(constraintsDict, "min_lines") 
+                            : null),
 
-                MinPolylines = GetNullableIntFromDict(constraintsDict, "min_polylines"),
-                MaxPolylines = GetNullableIntFromDict(constraintsDict, "max_polylines"),
+                Polylines = GetNullableIntFromDict(constraintsDict, "polylines") ?? 
+                            (GetNullableIntFromDict(constraintsDict, "min_polylines") == GetNullableIntFromDict(constraintsDict, "max_polylines") 
+                                ? GetNullableIntFromDict(constraintsDict, "min_polylines") 
+                                : null),
 
-                MinArcs = GetNullableIntFromDict(constraintsDict, "min_arcs"),
-                MaxArcs = GetNullableIntFromDict(constraintsDict, "max_arcs"),
+                Arcs = GetNullableIntFromDict(constraintsDict, "arcs") ?? 
+                       (GetNullableIntFromDict(constraintsDict, "min_arcs") == GetNullableIntFromDict(constraintsDict, "max_arcs") 
+                           ? GetNullableIntFromDict(constraintsDict, "min_arcs") 
+                           : null),
 
-                MinHatches = GetNullableIntFromDict(constraintsDict, "min_hatches"),
-                MaxHatches = GetNullableIntFromDict(constraintsDict, "max_hatches"),
+                Hatches = GetNullableIntFromDict(constraintsDict, "hatches") ?? 
+                          (GetNullableIntFromDict(constraintsDict, "min_hatches") == GetNullableIntFromDict(constraintsDict, "max_hatches") 
+                              ? GetNullableIntFromDict(constraintsDict, "min_hatches") 
+                              : null),
 
-                MinTexts = GetNullableIntFromDict(constraintsDict, "min_texts"),
-                MaxTexts = GetNullableIntFromDict(constraintsDict, "max_texts")
+                Texts = GetNullableIntFromDict(constraintsDict, "texts") ?? 
+                        (GetNullableIntFromDict(constraintsDict, "min_texts") == GetNullableIntFromDict(constraintsDict, "max_texts") 
+                            ? GetNullableIntFromDict(constraintsDict, "min_texts") 
+                            : null)
             };
 
             return constraints;

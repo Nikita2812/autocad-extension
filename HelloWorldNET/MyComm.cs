@@ -2354,11 +2354,90 @@ namespace HelloWorldNET
                         {
                             Line line = (Line)ent;
                             minX = Math.Min(minX, line.StartPoint.X);
-                            minX = Math.Min(minX, line.EndPoint.X);\n                            maxX = Math.Max(maxX, line.StartPoint.X);\n                            maxX = Math.Max(maxX, line.EndPoint.X);\n                            minY = Math.Min(minY, line.StartPoint.Y);\n                            minY = Math.Min(minY, line.EndPoint.Y);\n                            maxY = Math.Max(maxY, line.StartPoint.Y);\n                            maxY = Math.Max(maxY, line.EndPoint.Y);\n                            hasValidCoordinates = true;\n                        }\n                        else if (ent is Arc)\n                        {
-                            Arc arc = (Arc)ent;\n                            // Get bounding box by checking arc start, end, and center\n                            minX = Math.Min(minX, arc.Center.X - arc.Radius);\n                            maxX = Math.Max(maxX, arc.Center.X + arc.Radius);\n                            minY = Math.Min(minY, arc.Center.Y - arc.Radius);\n                            maxY = Math.Max(maxY, arc.Center.Y + arc.Radius);\n                            hasValidCoordinates = true;\n                        }\n                        else if (ent is Polyline)\n                        {
-                            Polyline poly = (Polyline)ent;\n                            for (int i = 0; i < poly.NumberOfVertices; i++)\n                            {\n                                Point3d pt = poly.GetPoint3dAt(i);\n                                minX = Math.Min(minX, pt.X);\n                                maxX = Math.Max(maxX, pt.X);\n                                minY = Math.Min(minY, pt.Y);\n                                maxY = Math.Max(maxY, pt.Y);\n                                hasValidCoordinates = true;\n                            }\n                        }\n                        else if (ent is DBText)\n                        {
-                            DBText txt = (DBText)ent;\n                            minX = Math.Min(minX, txt.Position.X);\n                            maxX = Math.Max(maxX, txt.Position.X);\n                            minY = Math.Min(minY, txt.Position.Y);\n                            maxY = Math.Max(maxY, txt.Position.Y);\n                            hasValidCoordinates = true;\n                        }\n                        else if (ent is MText)\n                        {
-                            MText mtxt = (MText)ent;\n                            minX = Math.Min(minX, mtxt.Location.X);\n                            maxX = Math.Max(maxX, mtxt.Location.X);\n                            minY = Math.Min(minY, mtxt.Location.Y);\n                            maxY = Math.Max(maxY, mtxt.Location.Y);\n                            hasValidCoordinates = true;\n                        }\n                        else if (ent is Hatch)\n                        {
-                            Hatch hatch = (Hatch)ent;\n                            // Get hatch bounds\n                            Extents3d bounds = hatch.GeometricExtents;\n                            minX = Math.Min(minX, bounds.MinPoint.X);\n                            maxX = Math.Max(maxX, bounds.MaxPoint.X);\n                            minY = Math.Min(minY, bounds.MinPoint.Y);\n                            maxY = Math.Max(maxY, bounds.MaxPoint.Y);\n                            hasValidCoordinates = true;\n                        }\n                    }\n                    catch { /* Skip entities that fail bounds calculation */ }\n                }\n\n                // Calculate aspect ratio\n                if (!hasValidCoordinates)\n                    return null;\n\n                double width = maxX - minX;\n                double height = maxY - minY;\n\n                if (height <= 0)\n                    return null;\n\n                decimal aspectRatio = (decimal)(width / height);\n                return aspectRatio;\n            }\n            catch (System.Exception ex)\n            {\n                System.Diagnostics.Debug.WriteLine($\"Error calculating bounding box aspect ratio: {ex.Message}\");\n                return null;\n            }\n        }
+                            minX = Math.Min(minX, line.EndPoint.X);
+                            maxX = Math.Max(maxX, line.StartPoint.X);
+                            maxX = Math.Max(maxX, line.EndPoint.X);
+                            minY = Math.Min(minY, line.StartPoint.Y);
+                            minY = Math.Min(minY, line.EndPoint.Y);
+                            maxY = Math.Max(maxY, line.StartPoint.Y);
+                            maxY = Math.Max(maxY, line.EndPoint.Y);
+                            hasValidCoordinates = true;
+                        }
+                        else if (ent is Arc)
+                        {
+                            Arc arc = (Arc)ent;
+                            // Get bounding box by checking arc start, end, and center
+                            minX = Math.Min(minX, arc.Center.X - arc.Radius);
+                            maxX = Math.Max(maxX, arc.Center.X + arc.Radius);
+                            minY = Math.Min(minY, arc.Center.Y - arc.Radius);
+                            maxY = Math.Max(maxY, arc.Center.Y + arc.Radius);
+                            hasValidCoordinates = true;
+                        }
+                        else if (ent is Polyline)
+                        {
+                            Polyline poly = (Polyline)ent;
+                            for (int i = 0; i < poly.NumberOfVertices; i++)
+                            {
+                                Point3d pt = poly.GetPoint3dAt(i);
+                                minX = Math.Min(minX, pt.X);
+                                maxX = Math.Max(maxX, pt.X);
+                                minY = Math.Min(minY, pt.Y);
+                                maxY = Math.Max(maxY, pt.Y);
+                                hasValidCoordinates = true;
+                            }
+                        }
+                        else if (ent is DBText)
+                        {
+                            DBText txt = (DBText)ent;
+                            minX = Math.Min(minX, txt.Position.X);
+                            maxX = Math.Max(maxX, txt.Position.X);
+                            minY = Math.Min(minY, txt.Position.Y);
+                            maxY = Math.Max(maxY, txt.Position.Y);
+                            hasValidCoordinates = true;
+                        }
+                        else if (ent is MText)
+                        {
+                            MText mtxt = (MText)ent;
+                            minX = Math.Min(minX, mtxt.Location.X);
+                            maxX = Math.Max(maxX, mtxt.Location.X);
+                            minY = Math.Min(minY, mtxt.Location.Y);
+                            maxY = Math.Max(maxY, mtxt.Location.Y);
+                            hasValidCoordinates = true;
+                        }
+                        else if (ent is Hatch)
+                        {
+                            Hatch hatch = (Hatch)ent;
+                            // Get hatch bounds
+                            Extents3d bounds = hatch.GeometricExtents;
+                            minX = Math.Min(minX, bounds.MinPoint.X);
+                            maxX = Math.Max(maxX, bounds.MaxPoint.X);
+                            minY = Math.Min(minY, bounds.MinPoint.Y);
+                            maxY = Math.Max(maxY, bounds.MaxPoint.Y);
+                            hasValidCoordinates = true;
+                        }
+                    }
+                    catch { /* Skip entities that fail bounds calculation */ }
+                }
+
+                // Calculate aspect ratio
+                if (!hasValidCoordinates)
+                    return null;
+
+                double width = maxX - minX;
+                double height = maxY - minY;
+
+                if (height <= 0)
+                    return null;
+
+                decimal aspectRatio = (decimal)(width / height);
+                return aspectRatio;
+            }
+            catch (System.Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Error calculating bounding box aspect ratio: {ex.Message}");
+                return null;
+            }
+        }
     }
 }
+
